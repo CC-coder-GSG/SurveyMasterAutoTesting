@@ -1,4 +1,4 @@
-﻿# ci\wecom_notify.ps1
+﻿# ci\wecom_notify.ps1  (PowerShell 5.1 compatible + emoji)
 param(
   [Parameter(Mandatory=$true)][string]$Webhook,
   [Parameter(Mandatory=$true)][string]$BuildUrl,
@@ -8,36 +8,50 @@ param(
   [int]$ExitCode = 0
 )
 
-# =========================
-# 1) 计算“对外可访问”的 BuildPage（修复 localhost）
-#    方式：如果配置了环境变量 JENKINS_PUBLIC_URL（例如 http://192.168.2.229:8080）
-#    就用它替换 BuildUrl 的 scheme://host:port
-# =========================
+# --- normalize webhook ---
+if ($null -eq $Webhook) { $Webhook = "" }
+$Webhook = $Webhook.Trim()
+
+if ([string]::IsNullOrWhiteSpace($Webhook)) {
+  Write-Host "[ERROR] WECHAT_WEBHOOK is empty."
+  exit 2
+}
+
+# allow passing only key
+if ($Webhook -notmatch '^https?://') {
+  $Webhook = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=$Webhook"
+}
+
+try { [void][Uri]$Webhook } catch {
+  Write-Host ("[ERROR] Invalid webhook URI. length={0}" -f $Webhook.Length)
+  exit 2
+}
+
+# --- Build page: replace localhost using env:JENKINS_PUBLIC_URL if present ---
 $BuildPage = ($BuildUrl.TrimEnd('/') + "/")
 
-$public = ($env:JENKINS_PUBLIC_URL ?? "").Trim()
-if ($public) {
+$public = $env:JENKINS_PUBLIC_URL
+if ($null -eq $public) { $public = "" }
+$public = $public.Trim()
+
+if (-not [string]::IsNullOrWhiteSpace($public)) {
   $public = $public.TrimEnd('/')
   try {
     $u = [Uri]$BuildUrl
-    # 用 public base + Jenkins 给的 path（/job/xxx/21/）
     $BuildPage = $public + $u.AbsolutePath
     if (-not $BuildPage.EndsWith('/')) { $BuildPage += '/' }
   } catch {
-    # 解析失败就用原始 BuildUrl
     $BuildPage = ($BuildUrl.TrimEnd('/') + "/")
   }
 }
 
-# 你希望“下载入口”更像可下载目录：直接指向 results 目录
+# Downloadable entry (recommended)
 $ResultsDir = ($BuildPage + "artifact/results/")
 
-# =========================
-# 2) 解析 Robot output.xml 得到概览
-# =========================
-$pass = 0; $fail = 0; $skip = 0; $total = 0; $rate = 0.0
+# --- Parse robot output.xml stats ---
+$pass=0; $fail=0; $skip=0; $total=0; $rate=0.0
 $duration = ""
-$failedLine = ""
+$failedLine=""
 
 if (Test-Path $OutputXml) {
   try {
@@ -48,7 +62,6 @@ if (Test-Path $OutputXml) {
     if ($s) {
       $pass = [int]$s.pass
       $fail = [int]$s.fail
-
       $skipVal = $s.skip
       if (-not $skipVal) { $skipVal = $s.skipped }
       if ($skipVal) { $skip = [int]$skipVal }
@@ -57,7 +70,7 @@ if (Test-Path $OutputXml) {
       if ($total -gt 0) { $rate = [math]::Round($pass * 100.0 / $total, 1) }
     }
 
-    # 耗时：根 suite status 的 start/end time（尽力解析，不保证每次都有）
+    # duration: root suite status start/end (best effort)
     $st = $x.robot.suite.status
     if ($st -and $st.starttime -and $st.endtime) {
       try {
@@ -68,43 +81,37 @@ if (Test-Path $OutputXml) {
       } catch { }
     }
 
-    # 失败用例名（前 5）
+    # failed tests (top 5)
     if ($fail -gt 0) {
       $fails = Select-Xml -Path $OutputXml -XPath "//test[status[@status='FAIL']]" | Select-Object -First 5
       if ($fails) {
         $names = $fails | ForEach-Object { $_.Node.name }
-        $failedLine = "失败用例(前5)： " + ($names -join "，")
+        $failedLine = "❌失败用例(前5)： " + ($names -join "，")
       }
     }
-  } catch {
-    # 解析失败就走兜底
-  }
+  } catch { }
 }
 
-$status = if ($ExitCode -eq 0) { "PASS ✅" } else { "FAIL ❌" }
+$status = if ($ExitCode -eq 0) { "✅PASS" } else { "❌FAIL" }
+
 $overview = if ($total -gt 0) {
   "总计 $total，✅通过 $pass，❌失败 $fail，⏭跳过 $skip（通过率 $rate%）"
 } else {
-  "未读取到统计（output.xml 不存在或解析失败）"
+  "⚠️未读取到统计（output.xml 不存在或解析失败）"
 }
 
-$durLine = if ($duration) { "- 耗时：$duration" } else { "" }
+$durLine = if ($duration) { "- ⏱耗时：$duration" } else { "" }
 
-# =========================
-# 3) 发送企业微信 markdown
-# =========================
 $content = @"
 ### 🤖 Robot 自动化测试：$status
 - Job：$JobName  #$BuildNumber
 - 概览：$overview
 $durLine
 - 构建页：[$BuildPage]($BuildPage)
-- 下载入口：[$ResultsDir]($ResultsDir)
+- 📦下载入口：[$ResultsDir]($ResultsDir)
 "@.Trim()
 
-if ($failedLine) {
-  $content = $content + "`n- " + $failedLine
-}
+if ($failedLine) { $content = $content + "`n- " + $failedLine }
 
 $payload = @{
   msgtype  = "markdown"
@@ -113,13 +120,13 @@ $payload = @{
 
 try {
   $resp = Invoke-RestMethod -Method Post -Uri $Webhook -Body $payload -ContentType "application/json; charset=utf-8"
-  # 打印返回，方便排查是否真的发送成功
   if ($null -ne $resp -and $resp.errcode -ne $null) {
     Write-Host ("WeCom response: errcode={0}, errmsg={1}" -f $resp.errcode, $resp.errmsg)
+    if ($resp.errcode -ne 0) { exit 3 }
   } else {
     Write-Host "WeCom notified."
   }
 } catch {
-  Write-Host "WeCom notify failed:" $_.Exception.Message
+  Write-Host ("[ERROR] WeCom notify failed: {0}" -f $_.Exception.Message)
   exit 3
 }
