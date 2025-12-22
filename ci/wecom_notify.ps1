@@ -1,4 +1,4 @@
-# ci\wecom_notify.ps1
+﻿# ci\wecom_notify.ps1
 param(
   [Parameter(Mandatory=$true)][string]$Webhook,
   [Parameter(Mandatory=$true)][string]$BuildUrl,
