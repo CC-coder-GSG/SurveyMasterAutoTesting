@@ -68,7 +68,7 @@ $durLine = if ($duration) { "- 耗时：$duration" } else { "" }
 
 # 企业微信 markdown
 $content = @"
-### 🤖 Robot 自动化测试：$status
+### Robot 自动化测试：$status
 - Job：$JobName  #$BuildNumber
 - 概览：$overview
 $durLine
