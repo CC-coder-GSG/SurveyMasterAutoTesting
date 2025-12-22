@@ -165,4 +165,20 @@ if not "%OLD_PID%"=="" (
 )
 echo.
 
+REM ---- 8) 企业微信群通知（带概览）----
+REM Webhook 通过 Jenkins 凭据注入到环境变量 WECHAT_WEBHOOK，仓库里不要写 key
+if defined WECHAT_WEBHOOK (
+  powershell -NoProfile -ExecutionPolicy Bypass ^
+    -File "ci\wecom_notify.ps1" ^
+    -Webhook "%WECHAT_WEBHOOK%" ^
+    -BuildUrl "%BUILD_URL%" ^
+    -OutputXml "%WORKSPACE%\results\output.xml" ^
+    -JobName "%JOB_NAME%" ^
+    -BuildNumber "%BUILD_NUMBER%" ^
+    -ExitCode %RF_EXIT%
+) else (
+  echo [WARN] WECHAT_WEBHOOK not set, skip WeCom notify.
+)
+
+
 exit /b %RF_EXIT%
