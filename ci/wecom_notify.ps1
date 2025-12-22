@@ -8,11 +8,33 @@ param(
   [int]$ExitCode = 0
 )
 
-# 构建页（你希望跳转到：.../job/temp-rf-verify/21/ 这种）
+# =========================
+# 1) 计算“对外可访问”的 BuildPage（修复 localhost）
+#    方式：如果配置了环境变量 JENKINS_PUBLIC_URL（例如 http://192.168.2.229:8080）
+#    就用它替换 BuildUrl 的 scheme://host:port
+# =========================
 $BuildPage = ($BuildUrl.TrimEnd('/') + "/")
-# 可下载入口（可选，点进去能看到 results/ 等归档文件）
-$ArtifactRoot = ($BuildPage + "artifact/")
 
+$public = ($env:JENKINS_PUBLIC_URL ?? "").Trim()
+if ($public) {
+  $public = $public.TrimEnd('/')
+  try {
+    $u = [Uri]$BuildUrl
+    # 用 public base + Jenkins 给的 path（/job/xxx/21/）
+    $BuildPage = $public + $u.AbsolutePath
+    if (-not $BuildPage.EndsWith('/')) { $BuildPage += '/' }
+  } catch {
+    # 解析失败就用原始 BuildUrl
+    $BuildPage = ($BuildUrl.TrimEnd('/') + "/")
+  }
+}
+
+# 你希望“下载入口”更像可下载目录：直接指向 results 目录
+$ResultsDir = ($BuildPage + "artifact/results/")
+
+# =========================
+# 2) 解析 Robot output.xml 得到概览
+# =========================
 $pass = 0; $fail = 0; $skip = 0; $total = 0; $rate = 0.0
 $duration = ""
 $failedLine = ""
@@ -26,7 +48,7 @@ if (Test-Path $OutputXml) {
     if ($s) {
       $pass = [int]$s.pass
       $fail = [int]$s.fail
-      # 不同版本字段可能是 skip 或 skipped
+
       $skipVal = $s.skip
       if (-not $skipVal) { $skipVal = $s.skipped }
       if ($skipVal) { $skip = [int]$skipVal }
@@ -68,14 +90,16 @@ $overview = if ($total -gt 0) {
 
 $durLine = if ($duration) { "- 耗时：$duration" } else { "" }
 
-# 企业微信 markdown
+# =========================
+# 3) 发送企业微信 markdown
+# =========================
 $content = @"
 ### 🤖 Robot 自动化测试：$status
 - Job：$JobName  #$BuildNumber
 - 概览：$overview
 $durLine
 - 构建页：[$BuildPage]($BuildPage)
-- 下载入口：[$ArtifactRoot]($ArtifactRoot)
+- 下载入口：[$ResultsDir]($ResultsDir)
 "@.Trim()
 
 if ($failedLine) {
@@ -88,8 +112,14 @@ $payload = @{
 } | ConvertTo-Json -Compress
 
 try {
-  Invoke-RestMethod -Method Post -Uri $Webhook -Body $payload -ContentType "application/json; charset=utf-8" | Out-Null
-  Write-Host "WeCom notified."
+  $resp = Invoke-RestMethod -Method Post -Uri $Webhook -Body $payload -ContentType "application/json; charset=utf-8"
+  # 打印返回，方便排查是否真的发送成功
+  if ($null -ne $resp -and $resp.errcode -ne $null) {
+    Write-Host ("WeCom response: errcode={0}, errmsg={1}" -f $resp.errcode, $resp.errmsg)
+  } else {
+    Write-Host "WeCom notified."
+  }
 } catch {
   Write-Host "WeCom notify failed:" $_.Exception.Message
+  exit 3
 }
