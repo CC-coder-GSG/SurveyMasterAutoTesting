@@ -99,12 +99,7 @@ start "" /B cmd /c ""%APPIUM_CMD%" --address %APPIUM_HOST% --port %APPIUM_PORT% 
 
 REM ---- 4) 等待 Appium 就绪（最多 30 秒）----
 echo ====== WAIT APPIUM READY ======
-"%POWERSHELL_EXE%" -NoProfile -Command ^
-  "$u='%APPIUM_URL%/status';" ^
-  "for($i=0;$i -lt 30;$i++){" ^
-  "  try { $r = Invoke-WebRequest -UseBasicParsing $u -TimeoutSec 2; if($r.StatusCode -ge 200){ exit 0 } }" ^
-  "  catch { Start-Sleep -Seconds 1 }" ^
-  "}; exit 1"
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -Command "$u='%APPIUM_URL%/status'; for($i=0;$i -lt 30;$i++){ try{ $r=Invoke-WebRequest -UseBasicParsing $u -TimeoutSec 2; if($r.StatusCode -ge 200){ exit 0 } }catch{}; Start-Sleep -Seconds 1 }; exit 1"
 
 if errorlevel 1 (
   echo.
