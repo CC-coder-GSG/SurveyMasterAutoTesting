@@ -8,7 +8,7 @@ ${POLL_INTERVAL}      300ms
 *** Keywords ***
 Wait Visible
     [Arguments]    ${locator}    ${timeout}=${DEFAULT_TIMEOUT}
-    Wait Until Page Contains Element    ${locator}    ${timeout}
+    Wait Until Element Is Visible    ${locator}    ${timeout}
 
 Wait Gone
     [Arguments]    ${locator}    ${timeout}=${DEFAULT_TIMEOUT}

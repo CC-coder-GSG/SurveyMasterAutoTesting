@@ -10,15 +10,11 @@ ${RETRY_INTERVAL}     300ms
 
 *** Keywords ***
 Tap
-# 点击事件，防止元素还没出现就点 → 失败、动画/渲染/滑动导致偶发点不到 → 失败、Appium 偶发返回 error → 需要重试，失败时会进行截图
-    [Arguments]    ${locator}    ${timeout}=${DEFAULT_TIMEOUT}    ${retries}=${CLICK_RETRIES}
+    [Arguments]    ${locator}    ${timeout}=${DEFAULT_TIMEOUT}
+    # 1. 确保元素真正可见
     Wait Visible    ${locator}    ${timeout}
-    FOR    ${i}    IN RANGE    ${retries}
-        ${status}    ${msg}=    Run Keyword And Ignore Error    Click Element    ${locator}
-        Exit For Loop If    '${status}'=='PASS'
-        Sleep    ${RETRY_INTERVAL}
-    END
-    Run Keyword If    '${status}'!='PASS'    Fail With Screenshot    Tap failed: ${locator} | ${msg}
+    # 2. 直接点击（相信 Appium 的判断）
+    Click Element    ${locator}
 
 Input
 # 输入，防止输入框没出来就输入 → 失败、输入框里有旧内容 → 影响用例稳定、有些输入框必须先点击获取焦点才能输入
