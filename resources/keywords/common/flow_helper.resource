@@ -1,29 +1,33 @@
 *** Settings ***
 Library    AppiumLibrary
-# 如果您想复用 assert.resource 里的逻辑，也可以引入，但直接写更简单
-# Resource   assert.resource
 
 *** Variables ***
 ${APP_PACKAGE}        com.sinognss.sm.free
-${TARGET_ACTIVITY}    com.sinognss.sm.guide.ui.GuideActivity
+# 这是真实的主页 Activity，用于等待验证，而不是用于跳转
+${MAIN_ACTIVITY}      com.sinognss.sm.main.ui.MainActivity
 
 *** Keywords ***
-Force Jump To Guide Page
-    [Documentation]    底层关键字：强制跳转回引导页
-    Run Keyword And Ignore Error    Start Activity    ${APP_PACKAGE}    ${TARGET_ACTIVITY}
-    Run Keyword And Ignore Error    Wait Activity     ${TARGET_ACTIVITY}    5s
-
+Restart App To Home
+    [Documentation]    强力复位：直接杀掉 APP 并重启，确保回到主页
+    ...    适用场景：MainActivity 不允许直接跳转，且 GuideActivity 无法复位时。
+    
+    # 1. 杀掉 APP 进程 (相当于 adb shell am force-stop)
+    Terminate Application    ${APP_PACKAGE}
+    
+    # 2. 重新激活 APP (相当于点击桌面图标，会自动走 Guide -> Main 的流程)
+    Activate Application     ${APP_PACKAGE}
+    
+    # 3. 等待真实的主页加载出来 (给它一点时间启动)
+    Wait Until Page Contains Element    android=new UiSelector().text("项目")    10
 
 Run And Reset
     [Arguments]    ${flow_keyword}    @{args}
-    # 1) 执行流程，但不要让失败直接中断后续清理
-    ${status}    ${msg}=    Run Keyword And Ignore Error    ${flow_keyword}    @{args}
-
-    # 2) 失败才截图（截图失败也不要挡住“强制返回”）
-    Run Keyword If    '${status}' == 'FAIL'    Run Keyword And Ignore Error    Capture Page Screenshot
-
-    # 3) 无论成功失败都强制返回引导页（失败也别影响收尾）
-    Run Keyword And Ignore Error    Force Jump To Guide Page
-
-    # 4) 把原始失败抛回去，让用例最终仍是 FAIL
-    Run Keyword If    '${status}' == 'FAIL'    Fail    ${msg}
+    [Documentation]    封装器：运行业务流程 -> 失败截图 -> 重启复位
+    
+    # 运行原本的业务流程
+    Run Keyword    ${flow_keyword}    @{args}
+    
+    # 【Teardown】
+    # 1. 如果失败，先截图
+    # 2. 无论成功失败，都执行重启复位 (Restart App To Home)
+    [Teardown]    Run Keywords    Run Keyword If    '${KEYWORD STATUS}' == 'FAIL'    Capture Page Screenshot    AND    Restart App To Home

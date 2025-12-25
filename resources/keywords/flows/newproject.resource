@@ -12,5 +12,6 @@ Create A New Project
     ProjectManagement Button Click
     Wait Project List
     Scroll To And Tap Text Contains    text=AutoTestingProject
+    Tap Delete Project Button
     Tap Confirm Popup Confirm Button
 
