@@ -9,19 +9,21 @@ ${TARGET_ACTIVITY}    com.sinognss.sm.guide.ui.GuideActivity
 
 *** Keywords ***
 Force Jump To Guide Page
-    [Documentation]    底层关键字：强制跳转回主页
-    Start Activity    ${APP_PACKAGE}    ${TARGET_ACTIVITY}
-    Wait Activity     ${TARGET_ACTIVITY}    5s
+    [Documentation]    底层关键字：强制跳转回引导页
+    Run Keyword And Ignore Error    Start Activity    ${APP_PACKAGE}    ${TARGET_ACTIVITY}
+    Run Keyword And Ignore Error    Wait Activity     ${TARGET_ACTIVITY}    5s
+
 
 Run And Reset
     [Arguments]    ${flow_keyword}    @{args}
-    [Documentation]    封装器：运行传入的业务流程关键字。如果失败先截图，最后强制复位。
-    
-    # 运行原本的业务流程
-    Run Keyword    ${flow_keyword}    @{args}
-    
-    # 【修改重点】使用 Run Keywords 串联两个操作
-    # 1. 如果测试失败，立即截图 (保留现场)
-    # 2. AND (注意是大写)
-    # 3. 无论成功失败，都执行复位
-    [Teardown]    Run Keywords    Run Keyword If Test Failed    Capture Page Screenshot    AND    Force Jump To Guide Page
+    # 1) 执行流程，但不要让失败直接中断后续清理
+    ${status}    ${msg}=    Run Keyword And Ignore Error    ${flow_keyword}    @{args}
+
+    # 2) 失败才截图（截图失败也不要挡住“强制返回”）
+    Run Keyword If    '${status}' == 'FAIL'    Run Keyword And Ignore Error    Capture Page Screenshot
+
+    # 3) 无论成功失败都强制返回引导页（失败也别影响收尾）
+    Run Keyword And Ignore Error    Force Jump To Guide Page
+
+    # 4) 把原始失败抛回去，让用例最终仍是 FAIL
+    Run Keyword If    '${status}' == 'FAIL'    Fail    ${msg}
