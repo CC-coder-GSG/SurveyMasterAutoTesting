@@ -16,6 +16,10 @@ Open SurveyMaster App
     ...    noReset=${NO_RESET}
     ...    autoGrantPermissions=${AUTO_GRANT_PERMISSIONS}
     ...    newCommandTimeout=${NEW_COMMAND_TIMEOUT}
+    # 使用 Appium 自带的输入法，不弹出系统键盘
+    ...    unicodeKeyboard=${True}
+    # 测试结束后重置回系统默认输入法（避免测试完手机无法打字）
+    ...    resetKeyboard=${True}
 
 Close SurveyMaster App
     Close Application
