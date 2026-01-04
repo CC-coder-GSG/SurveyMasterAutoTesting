@@ -18,3 +18,11 @@ Thumbs.db
 
 # Local environment config (optional but recommended)
 resources/variables/env_test.yaml
+
+# Virtual environments
+rf_env/
+venv/
+.env/
+
+# Logs and reports
+logs/
