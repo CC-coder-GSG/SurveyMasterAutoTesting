@@ -3,7 +3,7 @@ Library    AppiumLibrary
 
 *** Variables ***
 ${REMOTE_URL}    http://127.0.0.1:4723
-${UDID}          4e83cae7
+${UDID}          1302c4b2
 ${APP_PKG}       com.sinognss.sm.free
 ${APP_ACT}       com.sinognss.sm.guide.ui.GuideActivity
 
