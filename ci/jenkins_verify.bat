@@ -76,10 +76,11 @@ node -v
 call "%APPIUM_CMD%" -v
 echo.
 
-REM ---- 2) 先清理 4723 端口 ----
+REM ---- 2) 只保留一次：启动前清理 4723 端口 ----
 echo ====== CLEAN PORT %APPIUM_PORT% (if occupied) ======
 set "OLD_PID="
-for /f %%P in ('"%POWERSHELL_EXE%" -NoProfile -Command "(Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)"') do set "OLD_PID=%%P"
+REM 关键修复：PowerShell 管道符 | 在 bat 的 for /f 命令替换里必须写成 ^|
+for /f "delims=" %%P in ('"%POWERSHELL_EXE%" -NoProfile -Command "(Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction SilentlyContinue ^| Select-Object -First 1 -ExpandProperty OwningProcess)"') do set "OLD_PID=%%P"
 if not "%OLD_PID%"=="" (
   echo Port %APPIUM_PORT% is used by PID=%OLD_PID%, killing...
   taskkill /F /PID %OLD_PID% >nul 2>&1
@@ -147,16 +148,18 @@ if not "%RF_EXIT%"=="0" (
   echo.
 )
 
-REM ---- 7) 结束后清理 Appium（按端口杀）----
-echo ====== STOP APPIUM (kill by port %APPIUM_PORT%) ======
-set "OLD_PID="
-for /f %%P in ('"%POWERSHELL_EXE%" -NoProfile -Command "(Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess)"') do set "OLD_PID=%%P"
-if not "%OLD_PID%"=="" (
-  echo Killing PID=%OLD_PID%
-  taskkill /F /PID %OLD_PID% >nul 2>&1
+REM ---- 7) 同步结果到 WORKSPACE\results（保证 wecom_notify.ps1 能读到 output.xml）----
+echo ====== SYNC RESULTS TO %WORKSPACE%\results ======
+if not exist "%WORKSPACE%\results" mkdir "%WORKSPACE%\results"
+robocopy "%CD%\%RF_OUTPUT_DIR%" "%WORKSPACE%\results" /E /NFL /NDL /NJH /NJS /NC /NS >nul
+set "RC=%ERRORLEVEL%"
+if %RC% GEQ 8 (
+  echo [WARN] robocopy sync results failed, code=%RC%
 ) else (
-  echo No listening process on %APPIUM_PORT%
+  echo [OK] Results synced to %WORKSPACE%\results
 )
+REM 清掉 robocopy 的 errorlevel（robocopy=1/2/3 在 Jenkins/脚本里经常被当失败）
+cmd /c exit /b 0
 echo.
 
 REM ---- 8) 企业微信群通知 ----
@@ -173,4 +176,6 @@ if defined WECHAT_WEBHOOK (
   echo [WARN] WECHAT_WEBHOOK not set, skip WeCom notify.
 )
 
+REM ---- 9) 不再在 bat 里二次按端口杀 Appium（只保留一次端口清理）----
+REM Jenkinsfile post 里你有 Stop-Process -Name node，会兜底清掉 Appium
 exit /b %RF_EXIT%
