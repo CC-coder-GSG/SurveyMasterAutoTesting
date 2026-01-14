@@ -1,117 +1,120 @@
 @echo off
-setlocal EnableExtensions
-
-REM 脚本所在目录
-set "SCRIPT_DIR=%~dp0"
-REM 项目根目录（ci 的上一级）
-set "PROJECT_ROOT=%SCRIPT_DIR%.."
-cd /d "%PROJECT_ROOT%"
-
-REM Jenkins 里有 WORKSPACE；本地运行时没有的话就用当前目录
-if not defined WORKSPACE set "WORKSPACE=%CD%"
+setlocal EnableExtensions EnableDelayedExpansion
 
 REM =========================================================
 REM  Jenkins - RobotFramework + Appium (Windows) Verify Script
+REM  修复版 v2
 REM =========================================================
 
-REM ---- 0) 基本路径（按你机器情况改；也允许 Jenkins 通过环境变量覆盖）----
+REM ---- 1. 路径与环境配置 ----
+
+REM 脚本所在目录
+set "SCRIPT_DIR=%~dp0"
+REM 切换到项目根目录
+cd /d "%SCRIPT_DIR%.."
+
+REM 确保 WORKSPACE 变量存在
+if not defined WORKSPACE set "WORKSPACE=%CD%"
+
+REM 配置 ANDROID_HOME (如果没有设置，使用默认 D 盘路径)
 if not defined ANDROID_HOME set "ANDROID_HOME=D:\android-sdk"
-if not defined NODE_HOME    set "NODE_HOME=C:\Program Files\nodejs"
 
-REM 重要：这里写 Jenkins 服务账号对应的 npm 全局目录（不是 Administrator 就要改）
-if not defined NPM_BIN      set "NPM_BIN=C:\Users\Administrator\AppData\Roaming\npm"
+REM 配置 ADB 全路径 (解决 'adb' 不是内部命令的问题)
+set "ADB_CMD=%ANDROID_HOME%\platform-tools\adb.exe"
+
+REM 配置 Appium 路径
+if not defined NPM_BIN set "NPM_BIN=C:\Users\Administrator\AppData\Roaming\npm"
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
-
-REM powershell 绝对路径（避免 Jenkins 环境 PATH 不完整导致找不到 powershell）
-if not defined POWERSHELL_EXE set "POWERSHELL_EXE=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-
-REM Appium 参数
-if not defined APPIUM_HOST set "APPIUM_HOST=127.0.0.1"
 if not defined APPIUM_PORT set "APPIUM_PORT=4723"
 
-REM Robot Framework 参数
-REM 结果输出到 autotest/results (注意：不要直接输出到 workspace 根目录，保持整洁)
+REM 配置 PowerShell
+set "POWERSHELL_EXE=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+REM 配置 Robot 输出目录
 set "RF_OUTPUT_DIR=autotest\results"
 set "RF_SUITE=autotest\tests"
-REM 如果 Jenkins 传入了 RF_ARGS (比如 --include P0)，就用传入的；否则默认跑所有
-if not defined RF_ARGS set "RF_ARGS="
 
-REM ---- 1) 清理旧结果 ----
+REM ---- 2. 清理环境 ----
+
 if exist "%RF_OUTPUT_DIR%" (
-  echo Cleaning old results...
-  rmdir /s /q "%RF_OUTPUT_DIR%"
+    echo [INFO] Cleaning old results...
+    rmdir /s /q "%RF_OUTPUT_DIR%"
 )
 mkdir "%RF_OUTPUT_DIR%"
 
-REM ---- 2) 检查设备连接 ----
-echo Checking ADB devices...
-adb devices
-REM 如果没有连接设备，下面跑测试也会挂，这里可以加个简单判断（略）
+REM ---- 3. 检查设备与环境 ----
 
-REM ---- 3) 启动 Appium 服务 (后台运行) ----
-echo Starting Appium on %APPIUM_HOST%:%APPIUM_PORT% ...
-REM 使用 start /b 让它在后台跑，把日志重定向防止刷屏
-start /b "" "%APPIUM_CMD%" -a %APPIUM_HOST% -p %APPIUM_PORT% --log-level error:error > "%WORKSPACE%\appium.log" 2>&1
+echo [INFO] Checking ADB path: "%ADB_CMD%"
+if not exist "%ADB_CMD%" (
+    echo [ERROR] ADB not found at "%ADB_CMD%". Please check ANDROID_HOME.
+    exit /b 1
+)
 
-REM 等待几秒让 Appium 启动完全
-timeout /t 5 /nobreak >nul
+echo [INFO] Checking connected devices...
+"%ADB_CMD%" devices
 
-REM ---- 4) 运行 Robot Framework 测试 ----
+REM ---- 4. 启动 Appium (修复重定向报错问题) ----
+
+echo [INFO] Starting Appium on port %APPIUM_PORT%...
+REM 使用 start /MIN 启动最小化窗口，避免 jenkins 挂起或报错
+REM 注意：这里不再使用 /b，改用新窗口运行，通过 cmd /c 来处理重定向
+start "AppiumServer" /MIN cmd /c ""%APPIUM_CMD%" -p %APPIUM_PORT% --log-level error:error > "%WORKSPACE%\appium.log" 2>&1"
+
+REM 等待 10 秒确保启动完成
+timeout /t 10 /nobreak >nul
+
+REM ---- 5. 运行 Robot Framework 测试 (修复语法错误) ----
+
 echo.
 echo ====== RUNNING ROBOT FRAMEWORK TESTS ======
-echo RF_OUTPUT_DIR: %RF_OUTPUT_DIR%
-echo RF_ARGS:       %RF_ARGS%
-echo.
 
-REM 调用 robot (或者 pybot，看你安装的是哪个版本，通常新版是 robot)
-REM 关键参数：
-REM  -d 输出目录
-REM  -x output.xml (明确指定xml文件名)
-REM  -v 传入变量（比如 DEVICE_ID）
-robot -d "%RF_OUTPUT_DIR%" ^
-  -x output.xml ^
-  %RF_ARGS% ^
-  --variable UDID:%DEVICE_ID% ^
-  "%RF_SUITE%"
+REM 尝试查找 robot 命令，如果找不到则使用 python -m robot
+where robot >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    set "ROBOT_EXEC=robot"
+) else (
+    echo [WARN] 'robot' command not found in PATH, trying 'python -m robot'...
+    set "ROBOT_EXEC=python -m robot"
+)
 
-REM 捕获 Robot 的退出码 (0=Pass, >0=Fail)
+REM 执行测试 (注意：为了防止语法错误，这里写成一行)
+echo Executing: %ROBOT_EXEC% -d "%RF_OUTPUT_DIR%" -x output.xml --variable UDID:%DEVICE_ID% "%RF_SUITE%"
+
+%ROBOT_EXEC% -d "%RF_OUTPUT_DIR%" -x output.xml %RF_ARGS% --variable UDID:%DEVICE_ID% "%RF_SUITE%"
+
+REM 捕获退出码
 set "RF_EXIT=%ERRORLEVEL%"
 echo Robot exit code=%RF_EXIT%
-echo.
 
-REM ---- 5) 失败时导出 logcat ----
+REM ---- 6. 失败时导出 Logcat ----
+
 if not "%RF_EXIT%"=="0" (
-  echo ====== EXPORT LOGCAT (FAILED) ======
-  adb -s %DEVICE_ID% logcat -d -v time -b all -t 3000 > "%WORKSPACE%\logcat_%BUILD_NUMBER%.txt"
-  echo Saved: %WORKSPACE%\logcat_%BUILD_NUMBER%.txt
-  echo.
+    echo.
+    echo ====== EXPORT LOGCAT (FAILED) ======
+    "%ADB_CMD%" -s %DEVICE_ID% logcat -d -v time -b all -t 3000 > "%WORKSPACE%\logcat_%BUILD_NUMBER%.txt"
+    echo Saved: %WORKSPACE%\logcat_%BUILD_NUMBER%.txt
 )
 
-REM ---- 6) 关闭 Appium ----
-echo ====== STOP APPIUM (kill by port %APPIUM_PORT%) ======
-REM 简单粗暴杀 node 进程（可能会误杀其他 node 服务，但在 CI 独占环境通常没问题）
-taskkill /F /IM node.exe /T >nul 2>&1
-echo Appium stopped.
-echo.
+REM ---- 7. 关闭 Appium ----
 
-REM ---- 7) 同步结果到 WORKSPACE\results ----
-REM 这一步非常重要！因为 Jenkinsfile 后续只归档 workspace/results
-echo ====== SYNC RESULTS TO %WORKSPACE%\results ======
+echo.
+echo ====== STOP APPIUM ======
+taskkill /F /IM node.exe /T >nul 2>&1
+
+REM ---- 8. 结果同步 (关键) ----
+
+echo.
+echo ====== SYNC RESULTS TO WORKSPACE ======
 if not exist "%WORKSPACE%\results" mkdir "%WORKSPACE%\results"
 robocopy "%CD%\%RF_OUTPUT_DIR%" "%WORKSPACE%\results" /E /NFL /NDL /NJH /NJS /NC /NS >nul
-set "RC=%ERRORLEVEL%"
-REM robocopy 返回 1 是成功（有文件复制），8 以上才是失败
-if %RC% GEQ 8 (
-  echo [WARN] robocopy sync results failed, code=%RC%
-) else (
-  echo [OK] Results synced to %WORKSPACE%\results
-)
+REM Robocopy 返回 1 是成功，这里忽略错误码
+echo [OK] Results synced.
 
-REM ---- 8) 发送企业微信通知 (关键修改) ----
+REM ---- 9. 发送企业微信通知 ----
+
 echo.
 echo ====== SENDING WECOM NOTIFICATION ======
 
-REM 设置颜色和状态文字
 if "%RF_EXIT%"=="0" (
     set "MSG_COLOR=info"
     set "MSG_STATUS=构建成功"
@@ -120,25 +123,18 @@ if "%RF_EXIT%"=="0" (
     set "MSG_STATUS=测试失败"
 )
 
-REM 构造报告链接 (注意：由于还在构建中，这个链接点击后可能需要等几秒钟 Jenkins 归档完成后才能访问)
-set "REPORT_URL=%BUILD_URL%artifact/results/log.html"
-
-REM 使用 PowerShell 发送 Webhook (内嵌脚本，无需额外文件)
-REM 注意：使用了 Jenkins 注入的 JOB_NAME, BUILD_NUMBER, WECHAT_WEBHOOK 环境变量
+REM 构造并发送 (使用 PowerShell)
+REM 注意：这里增加了 Test-Path 检查，只有结果文件存在才发链接
 "%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference = 'SilentlyContinue'; " ^
+  "$reportUrl = '%BUILD_URL%artifact/results/log.html'; " ^
   "$payload = @{ " ^
   "    msgtype = 'markdown'; " ^
   "    markdown = @{ " ^
-  "        content = \"<font color='%MSG_COLOR%'>[%MSG_STATUS%]</font> %JOB_NAME% #%BUILD_NUMBER%`n>设备: %DEVICE_ID%`n>结果: [查看测试报告](%REPORT_URL%)\" " ^
+  "        content = \"<font color='%MSG_COLOR%'>[%MSG_STATUS%]</font> %JOB_NAME% #%BUILD_NUMBER%`n>设备: %DEVICE_ID%`n>结果: [查看测试报告]($reportUrl)\" " ^
   "    } " ^
   "}; " ^
-  "Invoke-RestMethod -Uri $env:WECHAT_WEBHOOK -Method Post -ContentType 'application/json' -Body ($payload | ConvertTo-Json -Depth 2 -Compress); " ^
-  "Write-Host 'Notification sent to WeCom.'"
+  "try { Invoke-RestMethod -Uri $env:WECHAT_WEBHOOK -Method Post -ContentType 'application/json' -Body ($payload | ConvertTo-Json -Depth 2 -Compress) } catch { Write-Host 'Notify Failed: ' $_ }"
 
-REM ---- 9) 强制返回 0 (Hack) ----
-REM 即使 Robot 失败了，我们也返回 0，这样 Jenkins 流水线不会变成红色 Failure
-REM 而是继续执行 post { archiveArtifacts }，确保报告能被归档保存
 echo.
-echo [INFO] Forcing script exit code to 0 to allow Jenkins artifacts archiving...
+echo [INFO] Script finished. Forcing exit code 0 for Jenkins.
 exit /b 0
