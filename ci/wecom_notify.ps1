@@ -5,16 +5,19 @@ param(
   [Parameter(Mandatory=$true)][string]$OutputXml,
   [string]$JobName = "",
   [string]$BuildNumber = "",
-  [int]$ExitCode = 0
+  [int]$ExitCode = 0,
+
+  # 默认“通知失败不让流水线失败”
+  [switch]$FailOnNotifyError
 )
 
 # --- normalize webhook ---
 if ($null -eq $Webhook) { $Webhook = "" }
-$Webhook = $Webhook.Trim()
+$Webhook = $Webhook.Trim().Trim('"').Trim("'")
 
 if ([string]::IsNullOrWhiteSpace($Webhook)) {
-  Write-Host "[ERROR] WECHAT_WEBHOOK is empty."
-  exit 2
+  Write-Host "[WARN] WECHAT_WEBHOOK is empty."
+  if ($FailOnNotifyError) { exit 2 } else { exit 0 }
 }
 
 # allow passing only key
@@ -23,8 +26,8 @@ if ($Webhook -notmatch '^https?://') {
 }
 
 try { [void][Uri]$Webhook } catch {
-  Write-Host ("[ERROR] Invalid webhook URI. length={0}" -f $Webhook.Length)
-  exit 2
+  Write-Host ("[WARN] Invalid webhook URI. length={0}" -f $Webhook.Length)
+  if ($FailOnNotifyError) { exit 2 } else { exit 0 }
 }
 
 # --- Build page: replace localhost using env:JENKINS_PUBLIC_URL if present ---
@@ -55,6 +58,7 @@ $failedLine=""
 
 if (Test-Path $OutputXml) {
   try {
+    # 关键：-Raw，避免只读到第一行导致 XML 解析失败
     [xml]$x = Get-Content -Raw -Path $OutputXml
 
     # /robot/statistics/total/stat
@@ -89,7 +93,9 @@ if (Test-Path $OutputXml) {
         $failedLine = "❌失败用例(前5)： " + ($names -join "，")
       }
     }
-  } catch { }
+  } catch {
+    # keep default zeros
+  }
 }
 
 $status = if ($ExitCode -eq 0) { "✅PASS" } else { "❌FAIL" }
@@ -120,13 +126,19 @@ $payload = @{
 
 try {
   $resp = Invoke-RestMethod -Method Post -Uri $Webhook -Body $payload -ContentType "application/json; charset=utf-8"
-  if ($null -ne $resp -and $resp.errcode -ne $null) {
+
+  # 关键：$null 放左边（消除 PSScriptAnalyzer 提示）
+  if ($null -ne $resp -and $null -ne $resp.errcode) {
     Write-Host ("WeCom response: errcode={0}, errmsg={1}" -f $resp.errcode, $resp.errmsg)
-    if ($resp.errcode -ne 0) { exit 3 }
+    if ($resp.errcode -ne 0) {
+      if ($FailOnNotifyError) { exit 3 } else { exit 0 }
+    }
   } else {
     Write-Host "WeCom notified."
   }
 } catch {
-  Write-Host ("[ERROR] WeCom notify failed: {0}" -f $_.Exception.Message)
-  exit 3
+  Write-Host ("[WARN] WeCom notify failed: {0}" -f $_.Exception.Message)
+  if ($FailOnNotifyError) { exit 3 } else { exit 0 }
 }
+
+exit 0
