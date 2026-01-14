@@ -55,7 +55,7 @@ $failedLine=""
 
 if (Test-Path $OutputXml) {
   try {
-    [xml]$x = Get-Content -Path $OutputXml
+    [xml]$x = Get-Content -Raw -Path $OutputXml
 
     # /robot/statistics/total/stat
     $s = $x.robot.statistics.total.stat | Select-Object -First 1
