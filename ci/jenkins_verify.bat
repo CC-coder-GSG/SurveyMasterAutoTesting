@@ -4,10 +4,11 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  方案A（最终修正版）：
-rem    - 不依赖 appium.log / appium.err.log（规避加密问题）
-rem    - 仅通过 netstat 检测端口 4723 是否 LISTENING
-rem    - 修正 findstr 正则写法，确保能命中 127.0.0.1:4723
+rem  方案A - fixed:
+rem    - 完全不依赖 appium.log / appium.err.log（避免加密乱码）
+rem    - 只通过 netstat 检测 4723 LISTENING
+rem    - 检测逻辑改成子函数，避免 errorlevel 在 for 块里被玩坏
+rem    - 等待时间改为最多 ~90秒（60轮，每轮约1.5秒）
 rem ============================================================
 
 rem ---- 基本路径 ----
@@ -34,7 +35,7 @@ rem PATH：确保 npm bin 和 node 在 PATH 中
 set "PATH=%NPM_BIN%;%PATH%"
 if exist "C:\Program Files\nodejs\node.exe" set "PATH=C:\Program Files\nodejs;%PATH%"
 
-rem 结果与临时文件路径
+rem 结果与临时文件
 set "RESULTS_DST=%WORKSPACE%\results"
 set "RF_OUTPUT_DIR=%AUTOTEST_DIR%\results"
 set "ROBOT_CONSOLE_LOG=%RESULTS_DST%\robot_console.log"
@@ -65,7 +66,7 @@ if not exist "%APPIUM_CMD%" (
   exit /b 2
 )
 
-rem 仅用于确认 appium CLI 存在（输出乱码没关系）
+rem 确认 appium CLI 存在（输出乱码没关系）
 call "%APPIUM_CMD%" -v
 if errorlevel 1 (
   echo [ERROR] Appium CLI failed ^(check node/npm/appium installation^).
@@ -97,7 +98,7 @@ rem ---- 清理旧 Appium 进程 ----
 echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
 call :STOP_APPIUM >nul 2>&1
 
-rem 尝试按端口杀掉占用 4723 的进程
+rem 兜底：按端口杀掉占用 4723 的进程
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "try{Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop ^| %%{Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue}}catch{}" >nul 2>&1
 
@@ -108,20 +109,21 @@ if exist "%APPIUM_PID_FILE%" del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
 set "APPIUM_ARGS=--address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone"
 echo [INFO] Launch: "%APPIUM_CMD%" %APPIUM_ARGS%
 
-rem 关键：不再重定向日志，避免加密干扰
+rem 不重定向日志，避免加密干扰
 start "" /min "%APPIUM_CMD%" %APPIUM_ARGS%
 
-rem ---- 等待 Appium 就绪（只靠 netstat） ----
-echo [INFO] ===== WAIT APPIUM READY (up to 240s) =====
+rem ---- 等待 Appium 就绪（~90 秒上限） ----
+echo [INFO] ===== WAIT APPIUM READY (up to ~90s) =====
 set "APPIUM_UP=0"
-for /l %%i in (1,1,240) do (
+for /l %%i in (1,1,60) do (
   netstat -ano > "%NETSTAT_TMP%" 2>nul
-  rem ★★★ 修正点：去掉 /C:，只用正则匹配 :4723 和 LISTENING
-  findstr /R ":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%" >nul 2>&1
-  if !errorlevel! EQU 0 (
+
+  call :CHECK_PORT
+  if "!HAS_PORT!"=="1" (
     set "APPIUM_UP=1"
     goto :APPIUM_OK
   )
+
   ping -n 2 127.0.0.1 >nul
 )
 
@@ -163,7 +165,7 @@ if errorlevel 1 (
 
 echo [INFO] Robot console log: "%ROBOT_CONSOLE_LOG%"
 
-rem 判断 RF_ARGS 里是否已经包含用例路径（例如 tests 或 .robot）
+rem 判断 RF_ARGS 里是否已经包含用例路径（如 tests 或 xxx.robot）
 set "RF_APPEND_PATH=1"
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$a=$env:RF_ARGS; if($a -match '(^| )tests($| )' -or $a -match '\.robot' -or $a -match '[\\/]' ){ exit 0 } else { exit 1 }"
@@ -212,6 +214,19 @@ rem 2) 端口兜底方式
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "try{Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop ^| %%{Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue}}catch{}" >nul 2>&1
 
+exit /b 0
+
+rem ============================================================
+rem  子函数：检查 netstat 文件中是否有 :4723 LISTENING
+rem ============================================================
+:CHECK_PORT
+set "HAS_PORT=0"
+if not exist "%NETSTAT_TMP%" exit /b 0
+
+findstr /R ":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%" >nul 2>&1
+if not errorlevel 1 (
+  set "HAS_PORT=1"
+)
 exit /b 0
 
 :FAIL
