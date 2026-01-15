@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+chcp 65001 >nul
 
 REM =========================================================
 REM  Jenkins - RobotFramework + Appium (Windows) Verify Script
@@ -14,6 +15,13 @@ set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%.."
 set "PROJECT_DIR=%CD%"
 
+REM WORKSPACE fallback (when running locally)
+if not defined WORKSPACE (
+  for %%I in ("%PROJECT_DIR%\..") do set "WORKSPACE=%%~fI"
+)
+if not defined BUILD_NUMBER set "BUILD_NUMBER=0"
+
+
 REM Jenkins 通常会注入 WORKSPACE，这里只做兜底
 if not defined WORKSPACE set "WORKSPACE=%PROJECT_DIR%"
 
@@ -25,6 +33,20 @@ REM Appium
 if not defined NPM_BIN set "NPM_BIN=C:\Users\Administrator\AppData\Roaming\npm"
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not defined APPIUM_PORT set "APPIUM_PORT=4723"
+
+REM Ensure npm global bin is on PATH (for appium.cmd)
+set "PATH=%NPM_BIN%;%PATH%"
+
+REM Optional: if you installed Node.js somewhere else, set NODEJS_HOME to that folder (containing node.exe)
+if defined NODEJS_HOME set "PATH=%NODEJS_HOME%;%PATH%"
+
+REM Try common Node.js install paths if node not found
+where node >nul 2>&1
+if errorlevel 1 (
+  if exist "C:\Program Files\nodejs\node.exe" set "PATH=C:\Program Files\nodejs;%PATH%"
+  if exist "C:\Program Files (x86)\nodejs\node.exe" set "PATH=C:\Program Files (x86)\nodejs;%PATH%"
+)
+
 
 REM Robot 输出与测试目录（在 autotest 根目录下）
 set "RF_OUTPUT_DIR=results"
@@ -70,6 +92,11 @@ if not exist "%APPIUM_CMD%" (
   echo [ERROR] appium.cmd not found: "%APPIUM_CMD%"
   exit /b 1
 )
+REM ---- Versions (debug) ----
+where node >nul 2>&1 || (echo [ERROR] node not found in PATH. Install Node.js or fix PATH. & exit /b 2)
+for /f "delims=" %%v in ('node -v 2^>^&1') do echo [INFO] Node=%%v
+for /f "delims=" %%v in ('cmd /c ""%APPIUM_CMD%" -v" 2^>^&1') do echo [INFO] Appium=%%v
+
 
 REM ---- 4) 一次端口清理（只杀占用 4723 的 PID）----
 echo.
@@ -84,7 +111,7 @@ REM ---- 5) 启动 Appium ----
 echo.
 echo ====== START APPIUM ======
 REM 关键：用 cmd /c 才能稳定处理重定向
-start "AppiumServer" /MIN cmd /c ""%APPIUM_CMD%" -a 127.0.0.1 -p %APPIUM_PORT% --log-level error:error > "%WORKSPACE%\appium.log" 2>&1"
+start "AppiumServer" /MIN cmd /c ""%APPIUM_CMD%" -a 127.0.0.1 -p %APPIUM_PORT% --session-override --log-level error > "%WORKSPACE%\appium.log" 2>&1"
 
 REM 等待端口监听（最多 30 秒）
 set "APPIUM_READY="
@@ -95,6 +122,9 @@ for /l %%i in (1,1,30) do (
 :APPIUM_OK
 if not defined APPIUM_READY (
   echo [ERROR] Appium not listening on %APPIUM_PORT%. Check "%WORKSPACE%\appium.log"
+  echo ------ appium.log (tail 80) ------
+  powershell -NoProfile -Command "if (Test-Path \"%WORKSPACE%\\appium.log\") { Get-Content -Path \"%WORKSPACE%\\appium.log\" -Tail 80 } else { Write-Host \"[WARN] appium.log not found\" }"
+  echo -------------------------------
   exit /b 2
 )
 
