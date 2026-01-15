@@ -4,11 +4,10 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  Fix 2026-01-15 (v5.1):
-rem    - CRITICAL: Replace TIMEOUT (breaks in Jenkins stdin redirection) with PING sleep
-rem    - Keep stdout/stderr split (avoid Start-Process redirect conflict)
-rem    - Keep log tail IF/ELSE parentheses
-rem    - Harden Appium liveness check (trim pid, int cast)
+rem  v7.1:
+rem   - Force add Node.js PATH: C:\Program Files\nodejs
+rem   - Keep ping sleep (no TIMEOUT)
+rem   - Suppress Test-NetConnection warnings
 rem ============================================================
 
 set "CI_DIR=%~dp0"
@@ -17,7 +16,19 @@ set "AUTOTEST_DIR=%CD%"
 
 if not defined WORKSPACE set "WORKSPACE=%AUTOTEST_DIR%"
 
-rem ---- 1) Checks ----
+rem ---- 1) CRITICAL FIX: INJECT NODE.JS PATH ----
+set "PATH=C:\Program Files\nodejs;%PATH%"
+
+echo [INFO] Checking Node.js...
+where node
+node -v
+if errorlevel 1 (
+  echo [ERROR] 'node' still not working after PATH injection.
+  echo [INFO] PATH=%PATH%
+  exit /b 2
+)
+
+rem ---- 2) Checks ----
 if not defined DEVICE_ID (
   echo [ERROR] DEVICE_ID is not set.
   exit /b 2
@@ -30,24 +41,24 @@ if not defined NPM_BIN set "NPM_BIN=%APPDATA%\npm"
 if not defined APPIUM_CMD set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not defined APPIUM_PORT set "APPIUM_PORT=4723"
 
+rem Ensure npm bin is also in PATH
+set "PATH=%NPM_BIN%;%PATH%"
+
 set "APPIUM_LOG=%WORKSPACE%\appium.log"
 set "APPIUM_ERR_LOG=%WORKSPACE%\appium.err.log"
 set "APPIUM_PID_FILE=%WORKSPACE%\appium.pid"
-
 set "RF_OUTPUT_DIR=results"
 set "RESULTS_DST=%WORKSPACE%\results"
 
-rem ---- 2) Clean ----
+rem ---- 3) Clean ----
 if exist "%RF_OUTPUT_DIR%" rmdir /s /q "%RF_OUTPUT_DIR%"
 mkdir "%RF_OUTPUT_DIR%" >nul 2>&1
 if exist "%RESULTS_DST%" rmdir /s /q "%RESULTS_DST%"
 mkdir "%RESULTS_DST%" >nul 2>&1
 
-rem ---- 3) Tools ----
+rem ---- 4) Tools ----
 if not exist "%ADB_CMD%" ( echo [ERROR] ADB not found: "%ADB_CMD%" & exit /b 2 )
 if not exist "%APPIUM_CMD%" ( echo [ERROR] appium.cmd not found: "%APPIUM_CMD%" & exit /b 2 )
-
-set "PATH=%NPM_BIN%;%PATH%"
 
 echo.
 echo ====== CHECK DEVICE ======
@@ -61,7 +72,6 @@ for /l %%i in (1,1,12) do (
     set "DEV_OK=1"
     goto :DEVICE_OK
   )
-  rem CRITICAL: TIMEOUT breaks under Jenkins; use ping sleep (~1s)
   ping -n 2 127.0.0.1 >nul
 )
 
@@ -90,7 +100,6 @@ echo ====== START APPIUM ======
 if exist "%APPIUM_LOG%" del /f /q "%APPIUM_LOG%" >nul 2>&1
 if exist "%APPIUM_ERR_LOG%" del /f /q "%APPIUM_ERR_LOG%" >nul 2>&1
 
-rem stdout/stderr split to avoid redirect conflict
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
   "$log=$env:APPIUM_LOG; $err=$env:APPIUM_ERR_LOG; $pidFile=$env:APPIUM_PID_FILE;" ^
@@ -108,34 +117,26 @@ echo.
 echo ====== WAIT APPIUM PORT ======
 set "APPIUM_UP=0"
 for /l %%i in (1,1,30) do (
-  rem Fail fast if process died (trim + int cast)
   powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "$pidVal = (Get-Content -Path $env:APPIUM_PID_FILE -ErrorAction SilentlyContinue | Select-Object -First 1);" ^
-    "if(-not $pidVal){ exit 100 };" ^
-    "$pidVal=$pidVal.Trim();" ^
-    "try { $pid=[int]$pidVal } catch { exit 100 };" ^
-    "if(-not (Get-Process -Id $pid -ErrorAction SilentlyContinue)){ exit 100 } else { exit 0 }"
+    "$pidVal=(Get-Content -Path $env:APPIUM_PID_FILE -ErrorAction SilentlyContinue | Select-Object -First 1); if(-not $pidVal){ exit 100 }; $pidVal=$pidVal.Trim(); try{$pid=[int]$pidVal}catch{exit 100}; if(-not (Get-Process -Id $pid -ErrorAction SilentlyContinue)){ exit 100 } else { exit 0 }"
   if !errorlevel! EQU 100 (
     echo [ERROR] Appium process died unexpectedly!
     goto :SHOW_APPIUM_LOGS_FAIL
   )
 
-  rem Check Port (Primary)
   powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "if (Test-NetConnection -ComputerName 127.0.0.1 -Port %APPIUM_PORT% -InformationLevel Quiet) { exit 0 } else { exit 1 }"
+    "if (Test-NetConnection -ComputerName 127.0.0.1 -Port %APPIUM_PORT% -InformationLevel Quiet -WarningAction SilentlyContinue) { exit 0 } else { exit 1 }"
   if !errorlevel! EQU 0 (
     set "APPIUM_UP=1"
     goto :APPIUM_OK
   )
 
-  rem Check Port (Fallback without pipes)
   netstat -ano > "%WORKSPACE%\_netstat.txt"
   findstr /R /C:":%APPIUM_PORT% .*LISTENING" "%WORKSPACE%\_netstat.txt" >nul && (
     set "APPIUM_UP=1"
     goto :APPIUM_OK
   )
 
-  rem CRITICAL: TIMEOUT breaks under Jenkins; use ping sleep (~1s)
   ping -n 2 127.0.0.1 >nul
 )
 
