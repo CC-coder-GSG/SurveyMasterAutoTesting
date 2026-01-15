@@ -4,11 +4,10 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  方案A - fixed:
-rem    - 完全不依赖 appium.log / appium.err.log（避免加密乱码）
-rem    - 只通过 netstat 检测 4723 LISTENING
-rem    - 检测逻辑改成子函数，避免 errorlevel 在 for 块里被玩坏
-rem    - 等待时间改为最多 ~90秒（60轮，每轮约1.5秒）
+rem  方案A 最终版：
+rem    - 不依赖 appium.log / appium.err.log（规避加密环境的乱码问题）
+rem    - 仅用 netstat 检测 4723 端口是否 LISTENING
+rem    - 等待 Appium 时间：最多 ~40~60 秒
 rem ============================================================
 
 rem ---- 基本路径 ----
@@ -35,7 +34,7 @@ rem PATH：确保 npm bin 和 node 在 PATH 中
 set "PATH=%NPM_BIN%;%PATH%"
 if exist "C:\Program Files\nodejs\node.exe" set "PATH=C:\Program Files\nodejs;%PATH%"
 
-rem 结果与临时文件
+rem 结果与临时文件路径
 set "RESULTS_DST=%WORKSPACE%\results"
 set "RF_OUTPUT_DIR=%AUTOTEST_DIR%\results"
 set "ROBOT_CONSOLE_LOG=%RESULTS_DST%\robot_console.log"
@@ -66,7 +65,7 @@ if not exist "%APPIUM_CMD%" (
   exit /b 2
 )
 
-rem 确认 appium CLI 存在（输出乱码没关系）
+rem 仅确认 appium CLI 存在（输出乱码也无所谓）
 call "%APPIUM_CMD%" -v
 if errorlevel 1 (
   echo [ERROR] Appium CLI failed ^(check node/npm/appium installation^).
@@ -98,7 +97,7 @@ rem ---- 清理旧 Appium 进程 ----
 echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
 call :STOP_APPIUM >nul 2>&1
 
-rem 兜底：按端口杀掉占用 4723 的进程
+rem 再按端口兜底杀一次
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "try{Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop ^| %%{Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue}}catch{}" >nul 2>&1
 
@@ -112,34 +111,31 @@ echo [INFO] Launch: "%APPIUM_CMD%" %APPIUM_ARGS%
 rem 不重定向日志，避免加密干扰
 start "" /min "%APPIUM_CMD%" %APPIUM_ARGS%
 
-rem ---- 等待 Appium 就绪（~90 秒上限） ----
-echo [INFO] ===== WAIT APPIUM READY (up to ~90s) =====
+rem ---- 等待 Appium 就绪（最多约 40~60 秒） ----
+echo [INFO] ===== WAIT APPIUM READY (up to ~60s) =====
 set "APPIUM_UP=0"
-for /l %%i in (1,1,60) do (
-  netstat -ano > "%NETSTAT_TMP%" 2>nul
 
-  call :CHECK_PORT
-  if "!HAS_PORT!"=="1" (
-    set "APPIUM_UP=1"
-    goto :APPIUM_OK
-  )
-
-  ping -n 2 127.0.0.1 >nul
+for /l %%i in (1,1,40) do (
+    rem 直接在线过滤 4723 + LISTENING，不再玩中间变量/子函数
+    netstat -ano | findstr ":%APPIUM_PORT% " | findstr "LISTENING" >nul 2>&1
+    if not errorlevel 1 (
+        set "APPIUM_UP=1"
+        goto :APPIUM_OK
+    )
+    ping -n 2 127.0.0.1 >nul
 )
 
 echo [ERROR] Appium timeout: port %APPIUM_PORT% not ready.
-if exist "%NETSTAT_TMP%" (
-  echo [DEBUG] netstat snapshot:
-  type "%NETSTAT_TMP%"
-)
+rem 打一份 netstat 方便你看现场
+netstat -ano | findstr ":%APPIUM_PORT% "
 goto :FAIL
 
 :APPIUM_OK
 echo [OK] Appium is ready on %APPIUM_PORT%.
 
 rem 通过 netstat 反查真正的 Appium PID，方便后面清理
-netstat -ano > "%NETSTAT_TMP%" 2>nul
-for /f "tokens=5" %%p in ('findstr /R ":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%"') do (
+netstat -ano | findstr ":%APPIUM_PORT% " | findstr "LISTENING" >"%NETSTAT_TMP%" 2>&1
+for /f "tokens=5" %%p in (%NETSTAT_TMP%) do (
   echo %%p>"%APPIUM_PID_FILE%"
   echo [INFO] Appium Service PID=%%p
   goto :PID_DONE
@@ -165,7 +161,7 @@ if errorlevel 1 (
 
 echo [INFO] Robot console log: "%ROBOT_CONSOLE_LOG%"
 
-rem 判断 RF_ARGS 里是否已经包含用例路径（如 tests 或 xxx.robot）
+rem 判断 RF_ARGS 中是否已经包含用例路径（tests 或 .robot）
 set "RF_APPEND_PATH=1"
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$a=$env:RF_ARGS; if($a -match '(^| )tests($| )' -or $a -match '\.robot' -or $a -match '[\\/]' ){ exit 0 } else { exit 1 }"
@@ -214,19 +210,6 @@ rem 2) 端口兜底方式
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "try{Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop ^| %%{Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue}}catch{}" >nul 2>&1
 
-exit /b 0
-
-rem ============================================================
-rem  子函数：检查 netstat 文件中是否有 :4723 LISTENING
-rem ============================================================
-:CHECK_PORT
-set "HAS_PORT=0"
-if not exist "%NETSTAT_TMP%" exit /b 0
-
-findstr /R ":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%" >nul 2>&1
-if not errorlevel 1 (
-  set "HAS_PORT=1"
-)
 exit /b 0
 
 :FAIL
