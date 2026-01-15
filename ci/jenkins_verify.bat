@@ -4,11 +4,12 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  Fix 2026-01-15 (v11):
-rem    - Root cause from logs: Appium is LISTENING on 4723 but the HTTP /status probe never succeeds.
-rem      So we switch readiness to "port LISTEN" (most reliable), and ONLY treat /status as optional.
-rem    - Also fix PID mismatch: the LISTENING PID is node.exe (child), while we previously saved cmd.exe PID.
-rem      We now save launcher PID separately and overwrite main PID with the port-owning PID once LISTENING.
+rem  v12 (2026-01-15)
+rem    - Fix: calling *.cmd/*.bat MUST use CALL, otherwise this script will end early
+rem    - Avoid Jenkins "Input redirection is not supported": use PING for waits (no TIMEOUT)
+rem    - Start Appium via cmd.exe /c and split stdout/stderr logs
+rem    - Wait for Appium by netstat->file (no pipes), then capture REAL PID by port
+rem    - Robot console log goes to: %WORKSPACE%\results\robot_console.log
 rem ============================================================
 
 set "CI_DIR=%~dp0"
@@ -17,12 +18,12 @@ set "AUTOTEST_DIR=%CD%"
 
 if not defined WORKSPACE set "WORKSPACE=%AUTOTEST_DIR%"
 
-rem ---- 0) Optional: ensure Node.js is in PATH (you confirmed location) ----
+rem ---- 0) Node.js PATH (optional) ----
 if exist "C:\Program Files\nodejs\node.exe" (
   set "PATH=C:\Program Files\nodejs;%PATH%"
 )
 
-rem ---- 1) Inputs / defaults ----
+rem ---- 1) Required inputs ----
 if not defined DEVICE_ID (
   echo [ERROR] DEVICE_ID is not set.
   exit /b 2
@@ -35,42 +36,44 @@ if not defined NPM_BIN set "NPM_BIN=%APPDATA%\npm"
 if not defined APPIUM_CMD set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not defined APPIUM_PORT set "APPIUM_PORT=4723"
 
+rem Ensure npm bin in PATH (for appium + node module scripts)
 set "PATH=%NPM_BIN%;%PATH%"
 
 set "APPIUM_LOG=%WORKSPACE%\appium.log"
 set "APPIUM_ERR_LOG=%WORKSPACE%\appium.err.log"
-
-rem launcher pid = cmd.exe / appium.cmd wrapper
-set "APPIUM_LAUNCHER_PID_FILE=%WORKSPACE%\appium.launcher.pid"
-rem main pid = real owning pid of port (node.exe)
 set "APPIUM_PID_FILE=%WORKSPACE%\appium.pid"
 
 set "RF_OUTPUT_DIR=results"
 set "RESULTS_DST=%WORKSPACE%\results"
+set "ROBOT_CONSOLE_LOG=%RESULTS_DST%\robot_console.log"
+set "NETSTAT_TMP=%WORKSPACE%\_netstat_check.txt"
 
-rem ---- 2) Clean results dirs ----
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
+
+rem ---- 2) Clean & prepare dirs ----
 if exist "%RF_OUTPUT_DIR%" rmdir /s /q "%RF_OUTPUT_DIR%"
 mkdir "%RF_OUTPUT_DIR%" >nul 2>&1
-if exist "%RESULTS_DST%" rmdir /s /q "%RESULTS_DST%"
-mkdir "%RESULTS_DST%" >nul 2>&1
+
+if not exist "%RESULTS_DST%" mkdir "%RESULTS_DST%" >nul 2>&1
+if exist "%ROBOT_CONSOLE_LOG%" del /f /q "%ROBOT_CONSOLE_LOG%" >nul 2>&1
 
 rem ---- 3) Tool checks ----
-if not exist "%ADB_CMD%" (
-  echo [ERROR] ADB not found: "%ADB_CMD%"
-  exit /b 2
-)
-if not exist "%APPIUM_CMD%" (
-  echo [ERROR] appium.cmd not found: "%APPIUM_CMD%"
-  exit /b 2
-)
+if not exist "%ADB_CMD%" ( echo [ERROR] ADB not found: "%ADB_CMD%" & exit /b 2 )
+if not exist "%APPIUM_CMD%" ( echo [ERROR] appium.cmd not found: "%APPIUM_CMD%" & exit /b 2 )
 
 echo.
 echo ====== ENV CHECK ======
-where node >nul 2>&1 && (node -v) || (echo [WARN] node not found in PATH)
-where npm  >nul 2>&1 && (npm -v)  || (echo [WARN] npm not found in PATH)
+where node >nul 2>&1 || (echo [ERROR] node not found in PATH & exit /b 2)
+node -v
 
-echo [INFO] Checking Appium version.
+rem IMPORTANT: appium.cmd is a *.cmd script. MUST use CALL or this script will end right here.
 call "%APPIUM_CMD%" -v
+if errorlevel 1 (
+  echo [ERROR] Appium CLI failed.
+  exit /b 2
+)
+echo [DBG] ENV CHECK OK, continue...
 
 echo.
 echo ====== CHECK DEVICE ======
@@ -96,10 +99,9 @@ echo [OK] Device "%DEVICE_ID%" is online.
 
 echo.
 echo ====== CLEAN PORT %APPIUM_PORT% ======
-
 call :STOP_APPIUM >nul 2>&1
 
-rem kill any process owning the port (best-effort)
+rem Best-effort: kill anything still listening on the port
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "try { $c = Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop; foreach($x in $c){ Stop-Process -Id $x.OwningProcess -Force -ErrorAction SilentlyContinue } } catch { }"
 
@@ -107,82 +109,91 @@ echo.
 echo ====== START APPIUM ======
 if exist "%APPIUM_LOG%" del /f /q "%APPIUM_LOG%" >nul 2>&1
 if exist "%APPIUM_ERR_LOG%" del /f /q "%APPIUM_ERR_LOG%" >nul 2>&1
-if exist "%APPIUM_LAUNCHER_PID_FILE%" del /f /q "%APPIUM_LAUNCHER_PID_FILE%" >nul 2>&1
 if exist "%APPIUM_PID_FILE%" del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
 
-rem NOTE: keep stdout/stderr split (avoid file lock / redirect conflicts)
+rem NOTE:
+rem appium.cmd may exit quickly after spawning the real node process.
+rem So we do NOT treat "launcher PID exited" as failure.
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
-  "$log=$env:APPIUM_LOG; $err=$env:APPIUM_ERR_LOG; $launcherPidFile=$env:APPIUM_LAUNCHER_PID_FILE;" ^
+  "$log=$env:APPIUM_LOG; $err=$env:APPIUM_ERR_LOG;" ^
   "$cmd=('\"'+$env:APPIUM_CMD+'\" --address 127.0.0.1 --port '+$env:APPIUM_PORT+' --log-level info --local-timezone');" ^
   "$p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $cmd) -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $err -PassThru;" ^
-  "$p.Id | Out-File -Encoding ascii $launcherPidFile;" ^
   "Write-Host ('[INFO] Appium launcher PID=' + $p.Id);"
 
 if errorlevel 1 (
-  echo [ERROR] Failed to launch Appium process.
+  echo [ERROR] Failed to launch Appium.
   goto :SHOW_APPIUM_LOGS_FAIL
 )
 
 echo.
-echo ====== WAIT APPIUM READY ======
+echo ====== WAIT APPIUM READY (port %APPIUM_PORT%) ======
 set "APPIUM_UP=0"
 for /l %%i in (1,1,60) do (
-
-  rem 1) Fail fast if launcher died
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "$pidVal = (Get-Content -Path $env:APPIUM_LAUNCHER_PID_FILE -ErrorAction SilentlyContinue | Select-Object -First 1);" ^
-    "if(-not $pidVal){ exit 100 }" ^
-    "$pidVal=$pidVal.Trim();" ^
-    "try { $pid=[int]$pidVal } catch { exit 100 }" ^
-    "if(-not (Get-Process -Id $pid -ErrorAction SilentlyContinue)){ exit 100 } else { exit 0 }"
-  if !errorlevel! EQU 100 (
-    echo [ERROR] Appium launcher died unexpectedly!
-    goto :SHOW_APPIUM_LOGS_FAIL
-  )
-
-  rem 2) PRIMARY READY CHECK: port is LISTENING
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "$c = Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1;" ^
-    "if($c) { $c.OwningProcess | Out-File -Encoding ascii $env:APPIUM_PID_FILE; exit 0 } else { exit 1 }"
+  netstat -ano > "%NETSTAT_TMP%"
+  findstr /R /C:":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%" >nul
   if !errorlevel! EQU 0 (
     set "APPIUM_UP=1"
     goto :APPIUM_OK
   )
-
   ping -n 2 127.0.0.1 >nul
 )
 
-echo [ERROR] Appium did not start listening on %APPIUM_PORT% (Timeout).
+echo [ERROR] Appium timeout (port %APPIUM_PORT% never LISTENING).
 goto :SHOW_APPIUM_LOGS_FAIL
 
 :APPIUM_OK
-echo [OK] Appium is listening on %APPIUM_PORT%.
-echo [INFO] Appium PID (port owner):
-type "%APPIUM_PID_FILE%" 2>nul
+echo [OK] Appium is LISTENING on %APPIUM_PORT%.
+
+rem Capture REAL PID by parsing netstat output (avoid Get-NetTCPConnection dependency)
+set "REAL_PID="
+for /f "tokens=1,2,3,4,5" %%a in ('findstr /R /C:":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%"') do (
+  set "REAL_PID=%%e"
+  goto :GOT_PID
+)
+
+:GOT_PID
+if not defined REAL_PID (
+  echo [WARN] Could not parse Appium PID from netstat. Cleanup may be weaker.
+) else (
+  echo %REAL_PID%> "%APPIUM_PID_FILE%"
+  echo [INFO] Appium service PID=%REAL_PID%
+)
 
 echo.
 echo ====== RUN ROBOT ======
 if not defined RF_TEST_PATH set "RF_TEST_PATH=tests"
 if not defined RF_ARGS set "RF_ARGS=--suite CreateNewProject"
 
-where robot >nul 2>&1
+where python >nul 2>&1 || (echo [ERROR] python not found in PATH & goto :FAIL)
+
+rem Prefer "python -m robot"; ensure it exists
+python -m robot --version >nul 2>&1
 if errorlevel 1 (
-  where python >nul 2>&1 || (echo [ERROR] python not found in PATH & goto :FAIL)
-  python -V
-  python -m robot %RF_ARGS% --outputdir "%RF_OUTPUT_DIR%" "%RF_TEST_PATH%"
-) else (
-  robot --version
-  robot %RF_ARGS% --outputdir "%RF_OUTPUT_DIR%" "%RF_TEST_PATH%"
+  echo [ERROR] Robot Framework not available in this python env.
+  echo         Try: python -m pip install robotframework robotframework-appiumlibrary Appium-Python-Client
+  goto :FAIL
 )
+
+echo [INFO] Robot console log: "%ROBOT_CONSOLE_LOG%"
+echo [INFO] CMD: python -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%"
+python -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%" >> "%ROBOT_CONSOLE_LOG%" 2>&1
 set "RF_EXIT=%ERRORLEVEL%"
+
+if not "%RF_EXIT%"=="0" (
+  echo [ERROR] Robot failed (exit=%RF_EXIT%). Printing last 120 lines of robot_console.log:
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+    "if(Test-Path '%ROBOT_CONSOLE_LOG%'){ Get-Content -Tail 120 '%ROBOT_CONSOLE_LOG%' }"
+)
 
 echo.
 echo ====== SYNC RESULTS ======
 if exist "%RF_OUTPUT_DIR%\output.xml" (
   robocopy "%RF_OUTPUT_DIR%" "%RESULTS_DST%" /E /NFL /NDL /NJH /NJS /NC /NS >nul
 ) else (
-  echo [WARN] output.xml not found under "%AUTOTEST_DIR%\%RF_OUTPUT_DIR%"
+  echo [ERROR] output.xml not found under "%AUTOTEST_DIR%\%RF_OUTPUT_DIR%".
+  echo         This usually means Robot did not really run or crashed early.
+  set "RF_EXIT=10"
 )
 
 echo.
@@ -191,46 +202,28 @@ call :STOP_APPIUM
 exit /b %RF_EXIT%
 
 :SHOW_APPIUM_LOGS_FAIL
-echo [ERROR] Appium logs (tail 120) - stdout:
+echo [ERROR] ===== Appium stdout (tail 80) =====
 if exist "%APPIUM_LOG%" (
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Content -Tail 120 '%APPIUM_LOG%'"
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Content -Tail 80 '%APPIUM_LOG%'"
 ) else (
   echo [WARN] appium.log not found
 )
 
-echo [ERROR] Appium logs (tail 120) - stderr:
+echo [ERROR] ===== Appium stderr (tail 80) =====
 if exist "%APPIUM_ERR_LOG%" (
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Content -Tail 120 '%APPIUM_ERR_LOG%'"
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Content -Tail 80 '%APPIUM_ERR_LOG%'"
 ) else (
   echo [WARN] appium.err.log not found
 )
-
-echo [INFO] netstat snapshot:
-netstat -ano | findstr /R /C:":%APPIUM_PORT% .*LISTENING" || echo [INFO] no LISTEN found
-
 goto :FAIL
 
 :STOP_APPIUM
-rem 1) kill port owner pid
 if exist "%APPIUM_PID_FILE%" (
   for /f "usebackq delims=" %%p in ("%APPIUM_PID_FILE%") do (
     if not "%%p"=="" taskkill /F /PID %%p >nul 2>&1
   )
   del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
 )
-
-rem 2) kill launcher pid (wrapper)
-if exist "%APPIUM_LAUNCHER_PID_FILE%" (
-  for /f "usebackq delims=" %%p in ("%APPIUM_LAUNCHER_PID_FILE%") do (
-    if not "%%p"=="" taskkill /F /PID %%p >nul 2>&1
-  )
-  del /f /q "%APPIUM_LAUNCHER_PID_FILE%" >nul 2>&1
-)
-
-rem 3) extra safety: kill any remaining listener on port
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "try { $c = Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop; foreach($x in $c){ Stop-Process -Id $x.OwningProcess -Force -ErrorAction SilentlyContinue } } catch { }"
-
 exit /b 0
 
 :FAIL
