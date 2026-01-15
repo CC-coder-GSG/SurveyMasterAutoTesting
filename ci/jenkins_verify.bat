@@ -122,7 +122,7 @@ echo [INFO] Launch: "%APPIUM_CMD%" %APPIUM_ARGS%
 
 rem CRITICAL: start in background + explicit redirection
 rem (avoid Start-Process redirection issues in some agents)
-start "" /b cmd /v:on /c ""%APPIUM_CMD%" %APPIUM_ARGS% 1>>"%APPIUM_LOG%" 2>>"%APPIUM_ERR_LOG%""
+start "" /b "%APPIUM_CMD%" %APPIUM_ARGS% 1>>"%APPIUM_LOG%" 2>>"%APPIUM_ERR_LOG%"
 
 rem ---- Wait Appium ready ----
 echo [INFO] ===== WAIT APPIUM READY (up to 240s) =====
