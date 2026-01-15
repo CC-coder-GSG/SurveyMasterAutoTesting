@@ -4,11 +4,11 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  Fix 2026-01-15 (v13 - ROBUST DETECTION):
-rem    1. KEEP: 'call' fixes for npm/appium (proven working).
-rem    2. KEEP: 'netstat > file' (proven safe).
-rem    3. FIX: Replace weak 'findstr' with PowerShell 'Select-String' for port detection.
-rem    4. DEBUG: Dump netstat file content on failure to see why it failed.
+rem  Fix 2026-01-15 (v14 - SIMPLEST DETECTION):
+rem    1. KEEP: 'call' fixes (Appium starts successfully now).
+rem    2. KEEP: 'netstat > file' (Safe from pipes).
+rem    3. FIX: Use Simple Wildcard Match (*...*) instead of Regex.
+rem       (Regex failed to match specific whitespace in previous run).
 rem ============================================================
 
 set "CI_DIR=%~dp0"
@@ -57,7 +57,6 @@ echo.
 echo ====== ENV CHECK ======
 where node >nul 2>&1 && node -v || echo [WARN] node not found in PATH
 
-rem [CRITICAL FIX] Use CALL to prevent script exit
 echo [INFO] Checking Appium version...
 call "%APPIUM_CMD%" -v
 if errorlevel 1 ( echo [ERROR] Appium CLI failed. & exit /b 2 )
@@ -90,7 +89,7 @@ if exist "%APPIUM_LOG%" del /f /q "%APPIUM_LOG%" >nul 2>&1
 if exist "%APPIUM_ERR_LOG%" del /f /q "%APPIUM_ERR_LOG%" >nul 2>&1
 if exist "%APPIUM_PID_FILE%" del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
 
-rem Start Appium (Launcher)
+rem Start Appium
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
   "$log=$env:APPIUM_LOG; $err=$env:APPIUM_ERR_LOG;" ^
@@ -105,13 +104,13 @@ echo ====== WAIT APPIUM READY ======
 set "APPIUM_UP=0"
 for /l %%i in (1,1,60) do (
   
-  rem 1. Dump netstat to file (Safe)
+  rem 1. Dump netstat (Safe)
   netstat -ano > "%NETSTAT_TMP%"
   
-  rem 2. Use PowerShell to check file (More robust regex than findstr)
-  rem Matches ":4723" followed by whitespace and "LISTENING"
+  rem 2. Use PowerShell Wildcard Match (Robust)
+  rem Checks for ":4723" AND "LISTENING" in the same line. No Regex complexity.
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "if (Select-String -Path $env:NETSTAT_TMP -Pattern ':%APPIUM_PORT%\s+.*LISTENING') { exit 0 } else { exit 1 }"
+    "if (Get-Content $env:NETSTAT_TMP | Where-Object { $_ -like '*:%APPIUM_PORT%*LISTENING*' }) { exit 0 } else { exit 1 }"
     
   if !errorlevel! EQU 0 (
       set "APPIUM_UP=1"
@@ -120,16 +119,16 @@ for /l %%i in (1,1,60) do (
   ping -n 2 127.0.0.1 >nul
 )
 echo [ERROR] Appium timeout. Port %APPIUM_PORT% was not detected.
-echo [DEBUG] Dumping last netstat capture for analysis:
+echo [DEBUG] Dumping last netstat capture:
 if exist "%NETSTAT_TMP%" type "%NETSTAT_TMP%"
 goto :SHOW_APPIUM_LOGS_FAIL
 
 :APPIUM_OK
 echo [OK] Appium is ready on port %APPIUM_PORT%.
 
-rem Find REAL PID using PowerShell parsing (Safe)
+rem Find REAL PID (Wildcard parsing)
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "$c = Get-Content $env:NETSTAT_TMP | Select-String ':%APPIUM_PORT%\s+.*LISTENING'; if($c){ $line=$c.ToString().Trim(); $parts=$line -split '\s+'; $pidVal=$parts[-1]; $pidVal | Out-File -Encoding ascii $env:APPIUM_PID_FILE; Write-Host ('[INFO] Appium Service PID=' + $pidVal) }"
+  "$line = Get-Content $env:NETSTAT_TMP | Where-Object { $_ -like '*:%APPIUM_PORT%*LISTENING*' } | Select-Object -First 1; if($line){ $parts=$line.Trim() -split '\s+'; $pidVal=$parts[-1]; $pidVal | Out-File -Encoding ascii $env:APPIUM_PID_FILE; Write-Host ('[INFO] Appium Service PID=' + $pidVal) }"
 
 echo.
 echo ====== RUN ROBOT ======
