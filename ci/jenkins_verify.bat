@@ -4,21 +4,20 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  Fix 2026-01-15 (v4):
-rem    - Fix Start-Process error: stdout/stderr must be different files
-rem    - Remove WAIT loop constructs that trigger "Input redirection is not supported"
-rem      (no `for /f (...) in ('netstat | findstr')`, no command-substitution)
-rem    - Use Test-NetConnection for port readiness (fallback to netstat without pipes)
+rem  Fix 2026-01-15 (v5.1):
+rem    - CRITICAL: Replace TIMEOUT (breaks in Jenkins stdin redirection) with PING sleep
+rem    - Keep stdout/stderr split (avoid Start-Process redirect conflict)
+rem    - Keep log tail IF/ELSE parentheses
+rem    - Harden Appium liveness check (trim pid, int cast)
 rem ============================================================
 
-rem ---- 0) Paths ----
 set "CI_DIR=%~dp0"
 cd /d "%CI_DIR%\.."
 set "AUTOTEST_DIR=%CD%"
 
 if not defined WORKSPACE set "WORKSPACE=%AUTOTEST_DIR%"
 
-rem ---- 1) Inputs / defaults ----
+rem ---- 1) Checks ----
 if not defined DEVICE_ID (
   echo [ERROR] DEVICE_ID is not set.
   exit /b 2
@@ -38,17 +37,16 @@ set "APPIUM_PID_FILE=%WORKSPACE%\appium.pid"
 set "RF_OUTPUT_DIR=results"
 set "RESULTS_DST=%WORKSPACE%\results"
 
-rem ---- 2) Clean old results ----
+rem ---- 2) Clean ----
 if exist "%RF_OUTPUT_DIR%" rmdir /s /q "%RF_OUTPUT_DIR%"
 mkdir "%RF_OUTPUT_DIR%" >nul 2>&1
 if exist "%RESULTS_DST%" rmdir /s /q "%RESULTS_DST%"
 mkdir "%RESULTS_DST%" >nul 2>&1
 
-rem ---- 3) Tool checks ----
+rem ---- 3) Tools ----
 if not exist "%ADB_CMD%" ( echo [ERROR] ADB not found: "%ADB_CMD%" & exit /b 2 )
 if not exist "%APPIUM_CMD%" ( echo [ERROR] appium.cmd not found: "%APPIUM_CMD%" & exit /b 2 )
 
-rem Ensure npm bin in PATH (for appium's child process resolution)
 set "PATH=%NPM_BIN%;%PATH%"
 
 echo.
@@ -57,16 +55,17 @@ echo ====== CHECK DEVICE ======
 
 set "DEV_OK=0"
 for /l %%i in (1,1,12) do (
-  powershell -NoProfile -NonInteractive -Command ^
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
     "$s = (& '%ADB_CMD%' -s '%DEVICE_ID%' get-state 2^>$null) -join ''; if($s.Trim() -eq 'device'){ exit 0 } else { exit 1 }"
   if !errorlevel! EQU 0 (
     set "DEV_OK=1"
     goto :DEVICE_OK
   )
-  timeout /t 1 /nobreak >nul
+  rem CRITICAL: TIMEOUT breaks under Jenkins; use ping sleep (~1s)
+  ping -n 2 127.0.0.1 >nul
 )
 
-echo [ERROR] Device "%DEVICE_ID%" not ready. adb devices output:
+echo [ERROR] Device "%DEVICE_ID%" not ready.
 "%ADB_CMD%" devices
 exit /b 3
 
@@ -76,7 +75,6 @@ echo [OK] Device "%DEVICE_ID%" is online.
 echo.
 echo ====== CLEAN PORT %APPIUM_PORT% ======
 
-rem Kill by PID file (if exists)
 if exist "%APPIUM_PID_FILE%" (
   for /f "usebackq delims=" %%p in ("%APPIUM_PID_FILE%") do (
     if not "%%p"=="" taskkill /F /PID %%p >nul 2>&1
@@ -84,8 +82,7 @@ if exist "%APPIUM_PID_FILE%" (
   del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
 )
 
-rem Kill listening process by port (PowerShell; no cmd pipes/redirection)
-powershell -NoProfile -NonInteractive -Command ^
+powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "try { $c = Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop; foreach($x in $c){ Stop-Process -Id $x.OwningProcess -Force -ErrorAction SilentlyContinue } } catch { }"
 
 echo.
@@ -93,11 +90,11 @@ echo ====== START APPIUM ======
 if exist "%APPIUM_LOG%" del /f /q "%APPIUM_LOG%" >nul 2>&1
 if exist "%APPIUM_ERR_LOG%" del /f /q "%APPIUM_ERR_LOG%" >nul 2>&1
 
-rem IMPORTANT: RedirectStandardOutput and RedirectStandardError must be different files
+rem stdout/stderr split to avoid redirect conflict
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
   "$log=$env:APPIUM_LOG; $err=$env:APPIUM_ERR_LOG; $pidFile=$env:APPIUM_PID_FILE;" ^
-  "$cmd=('\"'+$env:APPIUM_CMD+'\" --address 127.0.0.1 --port '+$env:APPIUM_PORT+' --log-level info');" ^
+  "$cmd=('\"'+$env:APPIUM_CMD+'\" --address 127.0.0.1 --port '+$env:APPIUM_PORT+' --log-level info --local-timezone');" ^
   "$p=Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $cmd) -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $err -PassThru;" ^
   "$p.Id | Out-File -Encoding ascii $pidFile;" ^
   "Write-Host ('[INFO] Appium PID=' + $p.Id);"
@@ -111,25 +108,38 @@ echo.
 echo ====== WAIT APPIUM PORT ======
 set "APPIUM_UP=0"
 for /l %%i in (1,1,30) do (
-  rem Use Test-NetConnection (no pipes)
-  powershell -NoProfile -NonInteractive -Command ^
+  rem Fail fast if process died (trim + int cast)
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
+    "$pidVal = (Get-Content -Path $env:APPIUM_PID_FILE -ErrorAction SilentlyContinue | Select-Object -First 1);" ^
+    "if(-not $pidVal){ exit 100 };" ^
+    "$pidVal=$pidVal.Trim();" ^
+    "try { $pid=[int]$pidVal } catch { exit 100 };" ^
+    "if(-not (Get-Process -Id $pid -ErrorAction SilentlyContinue)){ exit 100 } else { exit 0 }"
+  if !errorlevel! EQU 100 (
+    echo [ERROR] Appium process died unexpectedly!
+    goto :SHOW_APPIUM_LOGS_FAIL
+  )
+
+  rem Check Port (Primary)
+  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
     "if (Test-NetConnection -ComputerName 127.0.0.1 -Port %APPIUM_PORT% -InformationLevel Quiet) { exit 0 } else { exit 1 }"
   if !errorlevel! EQU 0 (
     set "APPIUM_UP=1"
     goto :APPIUM_OK
   )
 
-  rem Fallback: netstat without pipes (dump file then findstr)
+  rem Check Port (Fallback without pipes)
   netstat -ano > "%WORKSPACE%\_netstat.txt"
   findstr /R /C:":%APPIUM_PORT% .*LISTENING" "%WORKSPACE%\_netstat.txt" >nul && (
     set "APPIUM_UP=1"
     goto :APPIUM_OK
   )
 
-  timeout /t 1 /nobreak >nul
+  rem CRITICAL: TIMEOUT breaks under Jenkins; use ping sleep (~1s)
+  ping -n 2 127.0.0.1 >nul
 )
 
-echo [ERROR] Appium failed to start on %APPIUM_PORT%.
+echo [ERROR] Appium failed to start on %APPIUM_PORT% (Timeout).
 goto :SHOW_APPIUM_LOGS_FAIL
 
 :APPIUM_OK
@@ -166,9 +176,18 @@ exit /b %RF_EXIT%
 
 :SHOW_APPIUM_LOGS_FAIL
 echo [ERROR] Appium logs (tail 120) - stdout:
-if exist "%APPIUM_LOG%" powershell -NoProfile -NonInteractive -Command "Get-Content -Tail 120 '%APPIUM_LOG%'" else echo [WARN] appium.log not found
+if exist "%APPIUM_LOG%" (
+    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Content -Tail 120 '%APPIUM_LOG%'"
+) else (
+    echo [WARN] appium.log not found
+)
+
 echo [ERROR] Appium logs (tail 120) - stderr:
-if exist "%APPIUM_ERR_LOG%" powershell -NoProfile -NonInteractive -Command "Get-Content -Tail 120 '%APPIUM_ERR_LOG%'" else echo [WARN] appium.err.log not found
+if exist "%APPIUM_ERR_LOG%" (
+    powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Content -Tail 120 '%APPIUM_ERR_LOG%'"
+) else (
+    echo [WARN] appium.err.log not found
+)
 goto :FAIL
 
 :STOP_APPIUM
