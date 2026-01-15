@@ -4,11 +4,10 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  方案A版本（不依赖日志文件，只用端口判断 Appium 状态）
-rem  特点：
-rem    - 不再写入/读取 appium.log / appium.err.log（避免加密干扰）
-rem    - 仅通过 netstat 检测 4723 端口是否 LISTENING
-rem    - 仍然支持 DEVICE_ID、RF_ARGS、RF_TEST_PATH 等参数
+rem  方案A（最终修正版）：
+rem    - 不依赖 appium.log / appium.err.log（规避加密问题）
+rem    - 仅通过 netstat 检测端口 4723 是否 LISTENING
+rem    - 修正 findstr 正则写法，确保能命中 127.0.0.1:4723
 rem ============================================================
 
 rem ---- 基本路径 ----
@@ -66,7 +65,7 @@ if not exist "%APPIUM_CMD%" (
   exit /b 2
 )
 
-rem 仅用于确认 appium CLI 存在（输出乱码也无所谓）
+rem 仅用于确认 appium CLI 存在（输出乱码没关系）
 call "%APPIUM_CMD%" -v
 if errorlevel 1 (
   echo [ERROR] Appium CLI failed ^(check node/npm/appium installation^).
@@ -98,7 +97,7 @@ rem ---- 清理旧 Appium 进程 ----
 echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
 call :STOP_APPIUM >nul 2>&1
 
-rem 按端口杀掉可能占用 4723 的进程（最好努力）
+rem 尝试按端口杀掉占用 4723 的进程
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "try{Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop ^| %%{Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue}}catch{}" >nul 2>&1
 
@@ -112,18 +111,17 @@ echo [INFO] Launch: "%APPIUM_CMD%" %APPIUM_ARGS%
 rem 关键：不再重定向日志，避免加密干扰
 start "" /min "%APPIUM_CMD%" %APPIUM_ARGS%
 
-rem ---- 等待 Appium 就绪（仅靠 netstat） ----
+rem ---- 等待 Appium 就绪（只靠 netstat） ----
 echo [INFO] ===== WAIT APPIUM READY (up to 240s) =====
 set "APPIUM_UP=0"
 for /l %%i in (1,1,240) do (
-  rem 检查端口是否处于 LISTENING 状态
   netstat -ano > "%NETSTAT_TMP%" 2>nul
-  findstr /R /C:":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%" >nul 2>&1
+  rem ★★★ 修正点：去掉 /C:，只用正则匹配 :4723 和 LISTENING
+  findstr /R ":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%" >nul 2>&1
   if !errorlevel! EQU 0 (
     set "APPIUM_UP=1"
     goto :APPIUM_OK
   )
-
   ping -n 2 127.0.0.1 >nul
 )
 
@@ -139,7 +137,7 @@ echo [OK] Appium is ready on %APPIUM_PORT%.
 
 rem 通过 netstat 反查真正的 Appium PID，方便后面清理
 netstat -ano > "%NETSTAT_TMP%" 2>nul
-for /f "tokens=5" %%p in ('findstr /R /C:":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%"') do (
+for /f "tokens=5" %%p in ('findstr /R ":%APPIUM_PORT% .*LISTENING" "%NETSTAT_TMP%"') do (
   echo %%p>"%APPIUM_PID_FILE%"
   echo [INFO] Appium Service PID=%%p
   goto :PID_DONE
@@ -158,14 +156,14 @@ rem 检查 Robot Framework 是否安装
 python -c "import robot; print(robot.__version__)" >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Robot Framework not installed in this Python.
-  echo [HINT] 在服务器上运行一次：
+  echo [HINT] 请在服务器上执行：
   echo        pip install robotframework Appium-Python-Client robotframework-appiumlibrary
   goto :FAIL
 )
 
 echo [INFO] Robot console log: "%ROBOT_CONSOLE_LOG%"
 
-rem 判断 RF_ARGS 里是否已经包含用例路径（例如 tests 或 *.robot）
+rem 判断 RF_ARGS 里是否已经包含用例路径（例如 tests 或 .robot）
 set "RF_APPEND_PATH=1"
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
   "$a=$env:RF_ARGS; if($a -match '(^| )tests($| )' -or $a -match '\.robot' -or $a -match '[\\/]' ){ exit 0 } else { exit 1 }"
@@ -182,7 +180,7 @@ if "%RF_APPEND_PATH%"=="1" (
 set "RF_EXIT=%ERRORLEVEL%"
 
 if not "%RF_EXIT%"=="0" (
-  echo [ERROR] Robot failed (exit=%RF_EXIT%). Tail robot_console.log:
+  echo [ERROR] Robot failed ^(exit=%RF_EXIT%^). Tail robot_console.log:
   powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
     "if(Test-Path '%ROBOT_CONSOLE_LOG%'){Get-Content -Tail 120 '%ROBOT_CONSOLE_LOG%'}"
 )
