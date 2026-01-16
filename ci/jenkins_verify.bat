@@ -4,10 +4,10 @@ chcp 65001 >nul
 
 rem ============================================================
 rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  方案A 最终版：
-rem    - 不依赖 appium.log / appium.err.log（规避加密环境的乱码问题）
-rem    - 仅用 netstat 检测 4723 端口是否 LISTENING
-rem    - 等待 Appium 时间：最多 ~40~60 秒
+rem  方案A 最终版（修复 Python 环境不一致）：
+rem    - 强制使用指定 Python（避免 Jenkins 走到 Python312）
+rem    - 检查 AppiumLibrary / PyYAML 是否可用
+rem    - 不依赖 appium.log / appium.err.log（规避加密环境乱码）
 rem ============================================================
 
 rem ---- 基本路径 ----
@@ -16,6 +16,21 @@ cd /d "%CI_DIR%\.."
 set "AUTOTEST_DIR=%CD%"
 
 if not defined WORKSPACE set "WORKSPACE=%AUTOTEST_DIR%"
+
+rem ---- 固定 Python 解释器（关键修复点）----
+rem 建议直接指定你验证过可用的 Python314
+if not defined PY_EXE set "PY_EXE=C:\Python314\python.exe"
+
+if not exist "%PY_EXE%" (
+  echo [ERROR] PY_EXE not found: "%PY_EXE%"
+  echo [HINT] 请确认 Python 3.14 安装路径，或在 Jenkins 参数里传入 PY_EXE。
+  exit /b 2
+)
+
+echo [INFO] ===== PYTHON CHECK =====
+echo [INFO] PY_EXE="%PY_EXE%"
+"%PY_EXE%" -V
+"%PY_EXE%" -c "import sys; print('sys.executable=', sys.executable)"
 
 rem ---- 输入参数与默认值 ----
 if not defined DEVICE_ID (
@@ -68,7 +83,33 @@ if not exist "%APPIUM_CMD%" (
 rem 仅确认 appium CLI 存在（输出乱码也无所谓）
 call "%APPIUM_CMD%" -v
 if errorlevel 1 (
-  echo [ERROR] Appium CLI failed ^(check node/npm/appium installation^).
+  echo [ERROR] Appium CLI failed (check node/npm/appium installation).
+  exit /b 2
+)
+
+rem ---- Python 依赖检查（Robot/AppiumLibrary/PyYAML）----
+echo [INFO] ===== PYTHON DEPS CHECK =====
+"%PY_EXE%" -m pip show robotframework >nul 2>&1 || (
+  echo [ERROR] Robot Framework not installed in "%PY_EXE%".
+  echo [HINT] "%PY_EXE%" -m pip install -U robotframework
+  exit /b 2
+)
+
+"%PY_EXE%" -m pip show robotframework-appiumlibrary >nul 2>&1 || (
+  echo [ERROR] robotframework-appiumlibrary not installed in "%PY_EXE%".
+  echo [HINT] "%PY_EXE%" -m pip install -U robotframework-appiumlibrary
+  exit /b 2
+)
+
+"%PY_EXE%" -m pip show pyyaml >nul 2>&1 || (
+  echo [ERROR] PyYAML not installed in "%PY_EXE%". YAML variable file will fail.
+  echo [HINT] "%PY_EXE%" -m pip install -U pyyaml
+  exit /b 2
+)
+
+rem 进一步做一次 import 验证，确保不会出现 “No module named AppiumLibrary”
+"%PY_EXE%" -c "import robot, AppiumLibrary, yaml; print('robot=', robot.__version__); print('AppiumLibrary=', AppiumLibrary.__file__); print('yaml=', yaml.__version__)" || (
+  echo [ERROR] Python import check failed in "%PY_EXE%".
   exit /b 2
 )
 
@@ -116,7 +157,6 @@ echo [INFO] ===== WAIT APPIUM READY (up to ~60s) =====
 set "APPIUM_UP=0"
 
 for /l %%i in (1,1,40) do (
-    rem 直接在线过滤 4723 + LISTENING，不再玩中间变量/子函数
     netstat -ano | findstr ":%APPIUM_PORT% " | findstr "LISTENING" >nul 2>&1
     if not errorlevel 1 (
         set "APPIUM_UP=1"
@@ -126,7 +166,6 @@ for /l %%i in (1,1,40) do (
 )
 
 echo [ERROR] Appium timeout: port %APPIUM_PORT% not ready.
-rem 打一份 netstat 方便你看现场
 netstat -ano | findstr ":%APPIUM_PORT% "
 goto :FAIL
 
@@ -147,18 +186,6 @@ echo [INFO] ===== RUN ROBOT =====
 if not defined RF_TEST_PATH set "RF_TEST_PATH=tests"
 if not defined RF_ARGS set "RF_ARGS=--suite CreateNewProject"
 
-where python >nul 2>&1 || (echo [ERROR] python not found in PATH & goto :FAIL)
-python -V
-
-rem 检查 Robot Framework 是否安装
-python -c "import robot; print(robot.__version__)" >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] Robot Framework not installed in this Python.
-  echo [HINT] 请在服务器上执行：
-  echo        pip install robotframework Appium-Python-Client robotframework-appiumlibrary
-  goto :FAIL
-)
-
 echo [INFO] Robot console log: "%ROBOT_CONSOLE_LOG%"
 
 rem 判断 RF_ARGS 中是否已经包含用例路径（tests 或 .robot）
@@ -168,17 +195,17 @@ powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
 if !errorlevel! EQU 0 set "RF_APPEND_PATH=0"
 
 if "%RF_APPEND_PATH%"=="1" (
-  echo [INFO] CMD: python -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%"
-  python -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%" > "%ROBOT_CONSOLE_LOG%" 2>&1
+  echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%"
+  "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%" > "%ROBOT_CONSOLE_LOG%" 2>&1
 ) else (
-  echo [INFO] CMD: python -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS%
-  python -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% > "%ROBOT_CONSOLE_LOG%" 2>&1
+  echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS%
+  "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% > "%ROBOT_CONSOLE_LOG%" 2>&1
 )
 
 set "RF_EXIT=%ERRORLEVEL%"
 
 if not "%RF_EXIT%"=="0" (
-  echo [ERROR] Robot failed ^(exit=%RF_EXIT%^). Tail robot_console.log:
+  echo [ERROR] Robot failed (exit=%RF_EXIT%). Tail robot_console.log:
   powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
     "if(Test-Path '%ROBOT_CONSOLE_LOG%'){Get-Content -Tail 120 '%ROBOT_CONSOLE_LOG%'}"
 )
