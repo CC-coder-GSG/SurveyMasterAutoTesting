@@ -1,244 +1,138 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-chcp 65001 >nul
 
 rem ============================================================
-rem  Jenkins verify (Windows): Appium + Robot Framework
-rem  方案A 最终版（修复 Python 环境不一致）：
-rem    - 强制使用指定 Python（避免 Jenkins 走到 Python312）
-rem    - 检查 AppiumLibrary / PyYAML 是否可用
-rem    - 不依赖 appium.log / appium.err.log（规避加密环境乱码）
+rem Jenkins-friendly runner:
+rem - Force a specific Python (avoid mixed Python versions)
+rem - No non-ASCII comments/echo
+rem - No parentheses in echo text (avoid CMD parse issues in Jenkins wrapper)
 rem ============================================================
 
-rem ---- 基本路径 ----
-set "CI_DIR=%~dp0"
-cd /d "%CI_DIR%\.."
-set "AUTOTEST_DIR=%CD%"
+rem ---- Force Python 3.14 ----
+set "PY_HOME=C:\Python314"
+set "PY_EXE=%PY_HOME%\python.exe"
+set "PY_SCRIPTS=%PY_HOME%\Scripts"
+set "PATH=%PY_HOME%;%PY_SCRIPTS%;%PATH%"
 
-if not defined WORKSPACE set "WORKSPACE=%AUTOTEST_DIR%"
-
-rem ---- 固定 Python 解释器（关键修复点）----
-rem 建议直接指定你验证过可用的 Python314
-if not defined PY_EXE set "PY_EXE=C:\Python314\python.exe"
-
-if not exist "%PY_EXE%" (
-  echo [ERROR] PY_EXE not found: "%PY_EXE%"
-  echo [HINT] 请确认 Python 3.14 安装路径，或在 Jenkins 参数里传入 PY_EXE。
-  exit /b 2
+rem ---- Project root (autotest) ----
+set "ROOT=%~dp0.."
+pushd "%ROOT%" || (
+  echo [ERROR] Cannot cd to project root.
+  exit /b 1
 )
 
 echo [INFO] ===== PYTHON CHECK =====
 echo [INFO] PY_EXE="%PY_EXE%"
-"%PY_EXE%" -V
-"%PY_EXE%" -c "import sys; print('sys.executable=', sys.executable)"
+"%PY_EXE%" -V || exit /b 1
+"%PY_EXE%" -c "import sys; print('sys.executable=', sys.executable)" || exit /b 1
 
-rem ---- 输入参数与默认值 ----
-if not defined DEVICE_ID (
-  echo [ERROR] DEVICE_ID is not set.
+echo [INFO] ===== PYTHON DEPS CHECK =====
+call :check_pip_pkg robotframework
+call :check_pip_pkg robotframework-appiumlibrary
+call :check_pip_pkg pyyaml
+
+echo [INFO] ===== ENV CHECK =====
+where node >nul 2>&1 || (
+  echo [ERROR] node not found in PATH.
   exit /b 2
 )
-
-if not defined ANDROID_HOME set "ANDROID_HOME=D:\android-sdk"
-set "ADB_CMD=%ANDROID_HOME%\platform-tools\adb.exe"
-
-if not defined NPM_BIN set "NPM_BIN=%APPDATA%\npm"
-if not defined APPIUM_CMD set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
-if not defined APPIUM_PORT set "APPIUM_PORT=4723"
-
-rem Ensure npm bin and node are in PATH
-set "PATH=%NPM_BIN%;%PATH%"
-if exist "C:\Program Files\nodejs\node.exe" set "PATH=C:\Program Files\nodejs;%PATH%"
-
-rem 结果与临时文件路径
-set "RESULTS_DST=%WORKSPACE%\results"
-set "RF_OUTPUT_DIR=%AUTOTEST_DIR%\results"
-set "ROBOT_CONSOLE_LOG=%RESULTS_DST%\robot_console.log"
-set "NETSTAT_TMP=%WORKSPACE%\_netstat_check.txt"
-set "APPIUM_PID_FILE=%WORKSPACE%\appium.pid"
-
-set "PYTHONUTF8=1"
-set "PYTHONIOENCODING=utf-8"
-
-rem ---- 准备结果目录 ----
-if exist "%RF_OUTPUT_DIR%" rmdir /s /q "%RF_OUTPUT_DIR%"
-mkdir "%RF_OUTPUT_DIR%" >nul 2>&1
-
-if not exist "%RESULTS_DST%" mkdir "%RESULTS_DST%" >nul 2>&1
-if exist "%ROBOT_CONSOLE_LOG%" del /f /q "%ROBOT_CONSOLE_LOG%" >nul 2>&1
-
-rem ---- 工具检查 ----
-echo [INFO] ===== ENV CHECK =====
-where node >nul 2>&1 || (echo [ERROR] node not found in PATH & exit /b 2)
 node -v
 
-if not exist "%ADB_CMD%" (
-  echo [ERROR] ADB not found: "%ADB_CMD%"
+where npm >nul 2>&1 || (
+  echo [ERROR] npm not found in PATH.
   exit /b 2
 )
+for /f "delims=" %%v in ('npm -v') do echo npm %%v
+
+rem Try to locate appium.cmd
+set "NPM_BIN=%APPDATA%\npm"
+set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not exist "%APPIUM_CMD%" (
-  echo [ERROR] appium.cmd not found: "%APPIUM_CMD%"
+  for /f "delims=" %%p in ('where appium 2^>nul') do set "APPIUM_CMD=%%p"
+)
+
+if not exist "%APPIUM_CMD%" (
+  echo [ERROR] appium command not found.
+  echo [HINT] Run: npm i -g appium
   exit /b 2
 )
 
-rem 仅确认 appium CLI 存在（输出乱码也无所谓）
 call "%APPIUM_CMD%" -v
 if errorlevel 1 (
-  echo [ERROR] Appium CLI failed (check node/npm/appium installation).
+  echo [ERROR] Appium CLI failed. Check node/npm/appium installation.
   exit /b 2
 )
 
-rem ---- Python 依赖检查（Robot/AppiumLibrary/PyYAML）----
-echo [INFO] ===== PYTHON DEPS CHECK =====
-"%PY_EXE%" -m pip show robotframework >nul 2>&1 || (
-  echo [ERROR] Robot Framework not installed in "%PY_EXE%".
-  echo [HINT] "%PY_EXE%" -m pip install -U robotframework
-  exit /b 2
-)
-
-"%PY_EXE%" -m pip show robotframework-appiumlibrary >nul 2>&1 || (
-  echo [ERROR] robotframework-appiumlibrary not installed in "%PY_EXE%".
-  echo [HINT] "%PY_EXE%" -m pip install -U robotframework-appiumlibrary
-  exit /b 2
-)
-
-"%PY_EXE%" -m pip show pyyaml >nul 2>&1 || (
-  echo [ERROR] PyYAML not installed in "%PY_EXE%". YAML variable file will fail.
-  echo [HINT] "%PY_EXE%" -m pip install -U pyyaml
-  exit /b 2
-)
-
-rem 进一步做一次 import 验证，确保不会出现 “No module named AppiumLibrary”
-"%PY_EXE%" -c "import robot, AppiumLibrary, yaml; print('robot=', robot.__version__); print('AppiumLibrary=', AppiumLibrary.__file__); print('yaml=', yaml.__version__)" || (
-  echo [ERROR] Python import check failed in "%PY_EXE%".
-  exit /b 2
-)
-
-rem ---- 检查设备在线 ----
 echo [INFO] ===== CHECK DEVICE =====
-"%ADB_CMD%" start-server >nul 2>&1
-
-set "DEV_OK=0"
-for /l %%i in (1,1,20) do (
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "$s=((& '%ADB_CMD%' -s '%DEVICE_ID%' get-state 2^>$null) -join '').Trim(); if($s -eq 'device'){exit 0}else{exit 1}"
-  if !errorlevel! EQU 0 (
-    set "DEV_OK=1"
-    goto :DEVICE_OK
-  )
-  ping -n 2 127.0.0.1 >nul
+if "%DEVICE_ID%"=="" set "DEVICE_ID=4e83cae7"
+adb devices | findstr /i "%DEVICE_ID%" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] DEVICE_ID not online: %DEVICE_ID%
+  echo [HINT] Run: adb devices
+  exit /b 3
 )
-echo [ERROR] Device "%DEVICE_ID%" not ready.
-"%ADB_CMD%" devices
-exit /b 3
-
-:DEVICE_OK
 echo [OK] Device "%DEVICE_ID%" is online.
 
-rem ---- 清理旧 Appium 进程 ----
+set "APPIUM_PORT=4723"
+
 echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
-call :STOP_APPIUM >nul 2>&1
+call :kill_port %APPIUM_PORT%
 
-rem 再按端口兜底杀一次
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "try{Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop ^| %%{Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue}}catch{}" >nul 2>&1
-
-rem ---- 启动 Appium ----
 echo [INFO] ===== START APPIUM =====
-if exist "%APPIUM_PID_FILE%" del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
+if not exist "%ROOT%\results" mkdir "%ROOT%\results"
+set "APPIUM_LOG=%ROOT%\results\appium.log"
 
-set "APPIUM_ARGS=--address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone"
-echo [INFO] Launch: "%APPIUM_CMD%" %APPIUM_ARGS%
+echo [INFO] Launch: "%APPIUM_CMD%" --address 127.0.0.1 --port %APPIUM_PORT%
+start "appium" /b cmd /c "\"%APPIUM_CMD%\" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone > \"%APPIUM_LOG%\" 2>&1"
+timeout /t 2 /nobreak >nul
 
-rem 不重定向日志，避免加密干扰
-start "" /min "%APPIUM_CMD%" %APPIUM_ARGS%
-
-rem ---- 等待 Appium 就绪（最多约 40~60 秒） ----
-echo [INFO] ===== WAIT APPIUM READY (up to ~60s) =====
-set "APPIUM_UP=0"
-
-for /l %%i in (1,1,40) do (
-    netstat -ano | findstr ":%APPIUM_PORT% " | findstr "LISTENING" >nul 2>&1
-    if not errorlevel 1 (
-        set "APPIUM_UP=1"
-        goto :APPIUM_OK
-    )
-    ping -n 2 127.0.0.1 >nul
+echo [INFO] ===== WAIT APPIUM READY =====
+call :wait_port %APPIUM_PORT% 60
+if errorlevel 1 (
+  echo [ERROR] Appium not ready on port %APPIUM_PORT% within timeout.
+  echo [HINT] Check log: %APPIUM_LOG%
+  exit /b 4
 )
-
-echo [ERROR] Appium timeout: port %APPIUM_PORT% not ready.
-netstat -ano | findstr ":%APPIUM_PORT% "
-goto :FAIL
-
-:APPIUM_OK
 echo [OK] Appium is ready on %APPIUM_PORT%.
 
-rem 通过 netstat 反查真正的 Appium PID，方便后面清理
-netstat -ano | findstr ":%APPIUM_PORT% " | findstr "LISTENING" >"%NETSTAT_TMP%" 2>&1
-for /f "tokens=5" %%p in (%NETSTAT_TMP%) do (
-  echo %%p>"%APPIUM_PID_FILE%"
-  echo [INFO] Appium Service PID=%%p
-  goto :PID_DONE
-)
-:PID_DONE
-
-rem ---- 运行 Robot Framework 用例 ----
 echo [INFO] ===== RUN ROBOT =====
-if not defined RF_TEST_PATH set "RF_TEST_PATH=tests"
-if not defined RF_ARGS set "RF_ARGS=--suite CreateNewProject"
+set "OUTDIR=%ROOT%\results"
+if "%SUITE%"=="" set "SUITE=CreateNewProject"
 
-echo [INFO] Robot console log: "%ROBOT_CONSOLE_LOG%"
+echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% tests
+"%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% tests
+set "RC=%ERRORLEVEL%"
 
-rem 判断 RF_ARGS 中是否已经包含用例路径（tests 或 .robot）
-set "RF_APPEND_PATH=1"
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "$a=$env:RF_ARGS; if($a -match '(^| )tests($| )' -or $a -match '\.robot' -or $a -match '[\\/]' ){ exit 0 } else { exit 1 }"
-if !errorlevel! EQU 0 set "RF_APPEND_PATH=0"
+echo [INFO] ===== STOP APPIUM =====
+call :kill_port %APPIUM_PORT%
 
-if "%RF_APPEND_PATH%"=="1" (
-  echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%"
-  "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% "%RF_TEST_PATH%" > "%ROBOT_CONSOLE_LOG%" 2>&1
-) else (
-  echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS%
-  "%PY_EXE%" -m robot --outputdir "%RF_OUTPUT_DIR%" %RF_ARGS% > "%ROBOT_CONSOLE_LOG%" 2>&1
+popd
+exit /b %RC%
+
+:check_pip_pkg
+set "PKG=%~1"
+"%PY_EXE%" -m pip show "%PKG%" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Python package not installed: %PKG%
+  echo [HINT] Run: "%PY_EXE%" -m pip install %PKG%
+  exit /b 10
 )
-
-set "RF_EXIT=%ERRORLEVEL%"
-
-if not "%RF_EXIT%"=="0" (
-  echo [ERROR] Robot failed (exit=%RF_EXIT%). Tail robot_console.log:
-  powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-    "if(Test-Path '%ROBOT_CONSOLE_LOG%'){Get-Content -Tail 120 '%ROBOT_CONSOLE_LOG%'}"
-)
-
-rem ---- 同步结果到 Jenkins 工作区（results） ----
-echo [INFO] ===== SYNC RESULTS =====
-if exist "%RF_OUTPUT_DIR%\output.xml" (
-  robocopy "%RF_OUTPUT_DIR%" "%RESULTS_DST%" /E /NFL /NDL /NJH /NJS /NC /NS >nul
-) else (
-  echo [WARN] output.xml not found under "%RF_OUTPUT_DIR%"
-)
-
-call :STOP_APPIUM >nul 2>&1
-exit /b %RF_EXIT%
-
-rem ============================================================
-rem  停止 Appium：按 PID 杀进程树，再按端口兜底
-rem ============================================================
-:STOP_APPIUM
-rem 1) PID 文件方式
-if exist "%APPIUM_PID_FILE%" (
-  for /f "usebackq delims=" %%p in ("%APPIUM_PID_FILE%") do (
-    if not "%%p"=="" taskkill /F /T /PID %%p >nul 2>&1
-  )
-  del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
-)
-
-rem 2) 端口兜底方式
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command ^
-  "try{Get-NetTCPConnection -LocalPort %APPIUM_PORT% -State Listen -ErrorAction Stop ^| %%{Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue}}catch{}" >nul 2>&1
-
 exit /b 0
 
-:FAIL
-call :STOP_APPIUM >nul 2>&1
-exit /b 255
+:kill_port
+set "PORT=%~1"
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":%PORT% " 2^>nul') do (
+  echo [INFO] Kill PID %%p on port %PORT%
+  taskkill /F /PID %%p >nul 2>&1
+)
+exit /b 0
+
+:wait_port
+set "PORT=%~1"
+set "SECONDS=%~2"
+for /l %%i in (1,1,%SECONDS%) do (
+  powershell -NoProfile -Command "try{ $c = New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+  if not errorlevel 1 exit /b 0
+  timeout /t 1 /nobreak >nul
+)
+exit /b 1
