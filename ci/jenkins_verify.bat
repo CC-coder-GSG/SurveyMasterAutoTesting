@@ -45,7 +45,7 @@ if not defined NPM_BIN set "NPM_BIN=%APPDATA%\npm"
 if not defined APPIUM_CMD set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not defined APPIUM_PORT set "APPIUM_PORT=4723"
 
-rem PATH：确保 npm bin 和 node 在 PATH 中
+rem Ensure npm bin and node are in PATH
 set "PATH=%NPM_BIN%;%PATH%"
 if exist "C:\Program Files\nodejs\node.exe" set "PATH=C:\Program Files\nodejs;%PATH%"
 
