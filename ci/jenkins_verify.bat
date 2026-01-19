@@ -2,11 +2,12 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem ============================================================
-rem Jenkins verify runner (CALL-safe)
+rem Jenkins verify runner (CALL-safe, robust)
 rem - Force Python 3.14
 rem - Force Node path
 rem - CALL every .cmd/.bat invocation (npm/appium/etc.)
 rem - Use explicit adb.exe if possible
+rem - Robot failure does NOT fail Jenkins (nostatusrc + final exit 0)
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -121,7 +122,9 @@ call :wait_port %APPIUM_PORT% 60
 if errorlevel 1 (
   echo [ERROR] Appium not ready on port %APPIUM_PORT% within timeout.
   echo [HINT] Check log: %APPIUM_LOG%
-  exit /b 4
+  rem Even Appium startup failure should fail this stage, but you asked Jenkins overall should be SUCCESS.
+  rem We will still continue to stop any leftover and then exit 0 at the end.
+  goto stop_and_exit
 )
 echo [OK] Appium is ready on %APPIUM_PORT%.
 
@@ -130,16 +133,25 @@ set "OUTDIR=%ROOT%\results"
 if "%SUITE%"=="" set "SUITE=CreateNewProject"
 if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
 
-echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
-"%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
-set "RC=%ERRORLEVEL%"
+echo [INFO] CMD: "%PY_EXE%" -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
+"%PY_EXE%" -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
+set "ROBOT_RC=%ERRORLEVEL%"
 
+echo [INFO] Robot finished. ExitCode=%ROBOT_RC%
+echo [INFO] OutputDir="%OUTDIR%"
+
+:stop_and_exit
 echo [INFO] ===== STOP APPIUM =====
 call :kill_port %APPIUM_PORT%
 
-echo [INFO] ===== END jenkins_verify.bat RC=%RC% =====
+echo [INFO] ===== END jenkins_verify.bat (FORCE SUCCESS) =====
 popd
-exit /b %RC%
+
+rem IMPORTANT:
+rem You want Jenkins SUCCESS even when tests fail.
+rem Robot status is still recorded in output.xml/report.html.
+exit /b 0
+
 
 rem ============================================================
 rem Subroutines
@@ -157,9 +169,24 @@ exit /b 0
 
 :kill_port
 set "PORT=%~1"
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":%PORT% " 2^>nul') do (
-  echo [INFO] Kill PID %%p on port %PORT%
-  taskkill /F /PID %%p >nul 2>&1
+
+rem netstat output varies; parse "LISTENING" lines for the port, then take the last token as PID
+for /f "tokens=1,2,3,4,5,*" %%a in ('netstat -ano ^| findstr /r /c:":%PORT% " 2^>nul') do (
+  set "LINE_PID=%%f"
+  if not "!LINE_PID!"=="" (
+    rem remove possible spaces
+    for /f "delims= " %%p in ("!LINE_PID!") do set "PID=%%p"
+    if not "!PID!"=="" (
+      rem only kill numeric PID and ignore 0
+      echo !PID! | findstr /r "^[0-9][0-9]*$" >nul
+      if not errorlevel 1 (
+        if not "!PID!"=="0" (
+          echo [INFO] Kill PID !PID! on port %PORT%
+          taskkill /F /PID !PID! >nul 2>&1
+        )
+      )
+    )
+  )
 )
 exit /b 0
 
