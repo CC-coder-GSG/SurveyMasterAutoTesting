@@ -113,8 +113,8 @@ $content = @"
 - Job：$JobName  #$BuildNumber
 - 概览：$overview
 $durLine
-- 构建页：[$BuildPage]($BuildPage)
-- 📦下载入口：[$ResultsDir]($ResultsDir)
+- 构建页：[点击前往]($BuildPage)
+- 📦下载入口：[点击下载]($ResultsDir)
 "@.Trim()
 
 if ($failedLine) { $content = $content + "`n- " + $failedLine }
