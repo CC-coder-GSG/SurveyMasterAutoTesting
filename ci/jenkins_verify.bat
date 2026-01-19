@@ -2,10 +2,10 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem ============================================================
-rem Jenkins-friendly runner:
-rem - Force a specific Python (avoid mixed Python versions)
-rem - No non-ASCII comments/echo
-rem - No parentheses in echo text (avoid CMD parse issues in Jenkins wrapper)
+rem Jenkins-friendly runner
+rem - Force specific Python
+rem - Use CALL when invoking .cmd/.bat (npm/appium etc.)
+rem - Use absolute adb.exe when possible
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -18,6 +18,18 @@ rem ---- Force NodeJS and npm bin ----
 set "NODE_HOME=C:\Program Files\nodejs"
 set "NPM_BIN=%APPDATA%\npm"
 set "PATH=%NODE_HOME%;%NPM_BIN%;%PATH%"
+
+rem ---- ADB (prefer Jenkins env var ADB, else default Android SDK path) ----
+set "ADB_EXE="
+if not "%ADB%"=="" set "ADB_EXE=%ADB%"
+if "%ADB_EXE%"=="" (
+  if exist "D:\android-sdk\platform-tools\adb.exe" set "ADB_EXE=D:\android-sdk\platform-tools\adb.exe"
+)
+
+if not "%ADB_EXE%"=="" (
+  for %%D in ("%ADB_EXE%") do set "ADB_DIR=%%~dpD"
+  set "PATH=%ADB_DIR%;%PATH%"
+)
 
 rem ---- Project root (autotest) ----
 set "ROOT=%~dp0.."
@@ -40,18 +52,10 @@ echo [INFO] ===== ENV CHECK =====
 where node || (echo [ERROR] node not found in PATH. & exit /b 2)
 node -v
 
-where npm  || (echo [ERROR] npm not found in PATH. & exit /b 2)
-call npm -v
+where npm  || (echo [ERROR] npm not found in PATH.  & exit /b 2)
+call npm -v || (echo [ERROR] npm failed to run. & exit /b 2)
 
-where appium >nul 2>&1
-
-where npm >nul 2>&1 || (
-  echo [ERROR] npm not found in PATH.
-  exit /b 2
-)
-for /f "delims=" %%v in ('call npm -v') do echo npm %%v
-
-rem Try to locate appium.cmd
+rem ---- Locate appium.cmd ----
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not exist "%APPIUM_CMD%" (
   for /f "delims=" %%p in ('where appium 2^>nul') do set "APPIUM_CMD=%%p"
@@ -71,10 +75,19 @@ if errorlevel 1 (
 
 echo [INFO] ===== CHECK DEVICE =====
 if "%DEVICE_ID%"=="" set "DEVICE_ID=4e83cae7"
-adb devices | findstr /i "%DEVICE_ID%" >nul 2>&1
+
+if "%ADB_EXE%"=="" (
+  echo [ERROR] adb.exe not found. Set env ADB to full path, or install Android SDK platform-tools.
+  echo [HINT] Example: set ADB=D:\android-sdk\platform-tools\adb.exe
+  exit /b 3
+)
+
+"%ADB_EXE%" start-server >nul 2>&1
+
+"%ADB_EXE%" devices | findstr /i "%DEVICE_ID%" >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] DEVICE_ID not online: %DEVICE_ID%
-  echo [HINT] Run: adb devices
+  echo [HINT] Run: "%ADB_EXE%" devices
   exit /b 3
 )
 echo [OK] Device "%DEVICE_ID%" is online.
@@ -89,7 +102,7 @@ if not exist "%ROOT%\results" mkdir "%ROOT%\results"
 set "APPIUM_LOG=%ROOT%\results\appium.log"
 
 echo [INFO] Launch: "%APPIUM_CMD%" --address 127.0.0.1 --port %APPIUM_PORT%
-start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone > ""%APPIUM_LOG%"" 2>&1"
+start "appium" /b cmd /c "\"%APPIUM_CMD%\" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone > \"%APPIUM_LOG%\" 2>&1"
 timeout /t 2 /nobreak >nul
 
 echo [INFO] ===== WAIT APPIUM READY =====
