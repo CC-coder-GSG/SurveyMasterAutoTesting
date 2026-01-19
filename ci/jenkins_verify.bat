@@ -106,8 +106,8 @@ echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
 call :kill_port %APPIUM_PORT%
 
 echo [INFO] ===== START APPIUM =====
-if not exist "%ROOT%\results" mkdir "%ROOT%\results"
-set "APPIUM_LOG=%ROOT%\results\appium.log"
+if not exist "%ROOT%\..\results" mkdir "%ROOT%\..\results"
+set "APPIUM_LOG=%ROOT%\..\results\appium.log"
 
 echo [INFO] Launch Appium on 127.0.0.1:%APPIUM_PORT%
 echo [INFO] APPIUM_CMD="%APPIUM_CMD%"
@@ -129,7 +129,7 @@ if errorlevel 1 (
 echo [OK] Appium is ready on %APPIUM_PORT%.
 
 echo [INFO] ===== RUN ROBOT =====
-set "OUTDIR=%ROOT%\results"
+set "OUTDIR=%ROOT%\..\results"
 if "%SUITE%"=="" set "SUITE=CreateNewProject"
 if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
 
