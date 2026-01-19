@@ -13,6 +13,7 @@ set "PY_HOME=C:\Python314"
 set "PY_EXE=%PY_HOME%\python.exe"
 set "PY_SCRIPTS=%PY_HOME%\Scripts"
 set "PATH=%PY_HOME%;%PY_SCRIPTS%;%PATH%"
+
 rem ---- Force NodeJS and npm bin ----
 set "NODE_HOME=C:\Program Files\nodejs"
 set "NPM_BIN=%APPDATA%\npm"
@@ -38,15 +39,17 @@ call :check_pip_pkg pyyaml
 echo [INFO] ===== ENV CHECK =====
 where node || (echo [ERROR] node not found in PATH. & exit /b 2)
 node -v
-where npm  || (echo [ERROR] npm not found in PATH.  & exit /b 2)
-npm -v
+
+where npm  || (echo [ERROR] npm not found in PATH. & exit /b 2)
+call npm -v
+
 where appium >nul 2>&1
 
 where npm >nul 2>&1 || (
   echo [ERROR] npm not found in PATH.
   exit /b 2
 )
-for /f "delims=" %%v in ('npm -v') do echo npm %%v
+for /f "delims=" %%v in ('call npm -v') do echo npm %%v
 
 rem Try to locate appium.cmd
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
@@ -86,7 +89,7 @@ if not exist "%ROOT%\results" mkdir "%ROOT%\results"
 set "APPIUM_LOG=%ROOT%\results\appium.log"
 
 echo [INFO] Launch: "%APPIUM_CMD%" --address 127.0.0.1 --port %APPIUM_PORT%
-start "appium" /b cmd /c "\"%APPIUM_CMD%\" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone > \"%APPIUM_LOG%\" 2>&1"
+start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone > ""%APPIUM_LOG%"" 2>&1"
 timeout /t 2 /nobreak >nul
 
 echo [INFO] ===== WAIT APPIUM READY =====
