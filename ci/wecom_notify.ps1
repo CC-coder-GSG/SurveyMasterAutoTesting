@@ -98,7 +98,11 @@ if (Test-Path $OutputXml) {
   }
 }
 
-$status = if ($ExitCode -eq 0) { "✅PASS" } else { "❌FAIL" }
+if ($total -gt 0) {
+  $status = if ($fail -gt 0) { "❌FAIL" } else { "✅PASS" }
+} else {
+  $status = if ($ExitCode -eq 0) { "✅PASS" } else { "❌FAIL" }
+}
 
 $overview = if ($total -gt 0) {
   "总计 $total，✅通过 $pass，❌失败 $fail，⏭跳过 $skip（通过率 $rate%）"
