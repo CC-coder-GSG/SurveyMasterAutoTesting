@@ -13,6 +13,10 @@ set "PY_HOME=C:\Python314"
 set "PY_EXE=%PY_HOME%\python.exe"
 set "PY_SCRIPTS=%PY_HOME%\Scripts"
 set "PATH=%PY_HOME%;%PY_SCRIPTS%;%PATH%"
+rem ---- Force NodeJS and npm bin ----
+set "NODE_HOME=C:\Program Files\nodejs"
+set "NPM_BIN=%APPDATA%\npm"
+set "PATH=%NODE_HOME%;%NPM_BIN%;%PATH%"
 
 rem ---- Project root (autotest) ----
 set "ROOT=%~dp0.."
@@ -32,11 +36,11 @@ call :check_pip_pkg robotframework-appiumlibrary
 call :check_pip_pkg pyyaml
 
 echo [INFO] ===== ENV CHECK =====
-where node >nul 2>&1 || (
-  echo [ERROR] node not found in PATH.
-  exit /b 2
-)
+where node || (echo [ERROR] node not found in PATH. & exit /b 2)
 node -v
+where npm  || (echo [ERROR] npm not found in PATH.  & exit /b 2)
+npm -v
+where appium >nul 2>&1
 
 where npm >nul 2>&1 || (
   echo [ERROR] npm not found in PATH.
@@ -45,7 +49,6 @@ where npm >nul 2>&1 || (
 for /f "delims=" %%v in ('npm -v') do echo npm %%v
 
 rem Try to locate appium.cmd
-set "NPM_BIN=%APPDATA%\npm"
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not exist "%APPIUM_CMD%" (
   for /f "delims=" %%p in ('where appium 2^>nul') do set "APPIUM_CMD=%%p"
