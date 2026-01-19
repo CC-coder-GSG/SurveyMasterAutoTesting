@@ -2,10 +2,11 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem ============================================================
-rem Jenkins-friendly runner:
-rem - Force a specific Python (avoid mixed Python versions)
-rem - No non-ASCII comments/echo
-rem - No parentheses in echo text (avoid CMD parse issues in Jenkins wrapper)
+rem Jenkins verify runner (CALL-safe)
+rem - Force Python 3.14
+rem - Force Node path
+rem - CALL every .cmd/.bat invocation (npm/appium/etc.)
+rem - Use explicit adb.exe if possible
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -19,12 +20,23 @@ set "NODE_HOME=C:\Program Files\nodejs"
 set "NPM_BIN=%APPDATA%\npm"
 set "PATH=%NODE_HOME%;%NPM_BIN%;%PATH%"
 
+rem ---- ADB: prefer env ADB, else default path ----
+set "ADB_EXE="
+if not "%ADB%"=="" set "ADB_EXE=%ADB%"
+if "%ADB_EXE%"=="" (
+  if exist "D:\android-sdk\platform-tools\adb.exe" set "ADB_EXE=D:\android-sdk\platform-tools\adb.exe"
+)
+
 rem ---- Project root (autotest) ----
 set "ROOT=%~dp0.."
 pushd "%ROOT%" || (
   echo [ERROR] Cannot cd to project root.
   exit /b 1
 )
+
+echo [INFO] ===== START jenkins_verify.bat =====
+echo [INFO] BAT=%~f0
+echo [INFO] ROOT=%CD%
 
 echo [INFO] ===== PYTHON CHECK =====
 echo [INFO] PY_EXE="%PY_EXE%"
@@ -40,18 +52,11 @@ echo [INFO] ===== ENV CHECK =====
 where node || (echo [ERROR] node not found in PATH. & exit /b 2)
 node -v
 
-where npm  || (echo [ERROR] npm not found in PATH. & exit /b 2)
-call npm -v
+where npm || (echo [ERROR] npm not found in PATH. & exit /b 2)
+rem IMPORTANT: npm is npm.cmd, always CALL it
+call npm -v || (echo [ERROR] npm failed to run. & exit /b 2)
 
-where appium >nul 2>&1
-
-where npm >nul 2>&1 || (
-  echo [ERROR] npm not found in PATH.
-  exit /b 2
-)
-for /f "delims=" %%v in ('call npm -v') do echo npm %%v
-
-rem Try to locate appium.cmd
+rem ---- Locate appium.cmd (also a .cmd, must CALL) ----
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not exist "%APPIUM_CMD%" (
   for /f "delims=" %%p in ('where appium 2^>nul') do set "APPIUM_CMD=%%p"
@@ -63,6 +68,7 @@ if not exist "%APPIUM_CMD%" (
   exit /b 2
 )
 
+rem IMPORTANT: appium.cmd must be invoked with CALL
 call "%APPIUM_CMD%" -v
 if errorlevel 1 (
   echo [ERROR] Appium CLI failed. Check node/npm/appium installation.
@@ -70,16 +76,30 @@ if errorlevel 1 (
 )
 
 echo [INFO] ===== CHECK DEVICE =====
-if "%DEVICE_ID%"=="" set "DEVICE_ID=4e83cae7"
-adb devices | findstr /i "%DEVICE_ID%" >nul 2>&1
+if "%DEVICE_ID%"=="" (
+  echo [ERROR] DEVICE_ID is empty. Please set DEVICE_ID in Jenkins parameters.
+  exit /b 3
+)
+
+if "%ADB_EXE%"=="" (
+  echo [ERROR] adb.exe not found. Set env ADB to full path.
+  echo [HINT] Example: set ADB=D:\android-sdk\platform-tools\adb.exe
+  exit /b 3
+)
+
+echo [INFO] ADB_EXE="%ADB_EXE%"
+"%ADB_EXE%" start-server >nul 2>&1
+
+"%ADB_EXE%" devices | findstr /i "%DEVICE_ID%" >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] DEVICE_ID not online: %DEVICE_ID%
-  echo [HINT] Run: adb devices
+  echo [HINT] Run: "%ADB_EXE%" devices
   exit /b 3
 )
 echo [OK] Device "%DEVICE_ID%" is online.
 
-set "APPIUM_PORT=4723"
+rem ---- Appium port ----
+if "%APPIUM_PORT%"=="" set "APPIUM_PORT=4723"
 
 echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
 call :kill_port %APPIUM_PORT%
@@ -88,8 +108,12 @@ echo [INFO] ===== START APPIUM =====
 if not exist "%ROOT%\results" mkdir "%ROOT%\results"
 set "APPIUM_LOG=%ROOT%\results\appium.log"
 
-echo [INFO] Launch: "%APPIUM_CMD%" --address 127.0.0.1 --port %APPIUM_PORT%
-start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone > ""%APPIUM_LOG%"" 2>&1"
+echo [INFO] Launch Appium on 127.0.0.1:%APPIUM_PORT%
+echo [INFO] APPIUM_CMD="%APPIUM_CMD%"
+echo [INFO] APPIUM_LOG="%APPIUM_LOG%"
+
+rem IMPORTANT: start -> cmd /c -> CALL appium.cmd (keep CALL even in subshell)
+start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
 timeout /t 2 /nobreak >nul
 
 echo [INFO] ===== WAIT APPIUM READY =====
@@ -104,23 +128,29 @@ echo [OK] Appium is ready on %APPIUM_PORT%.
 echo [INFO] ===== RUN ROBOT =====
 set "OUTDIR=%ROOT%\results"
 if "%SUITE%"=="" set "SUITE=CreateNewProject"
+if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
 
-echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% tests
-"%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% tests
+echo [INFO] CMD: "%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
+"%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
 set "RC=%ERRORLEVEL%"
 
 echo [INFO] ===== STOP APPIUM =====
 call :kill_port %APPIUM_PORT%
 
+echo [INFO] ===== END jenkins_verify.bat RC=%RC% =====
 popd
 exit /b %RC%
+
+rem ============================================================
+rem Subroutines
+rem ============================================================
 
 :check_pip_pkg
 set "PKG=%~1"
 "%PY_EXE%" -m pip show "%PKG%" >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Python package not installed: %PKG%
-  echo [HINT] Run: "%PY_EXE%" -m pip install %PKG%
+  echo [HINT] Run: "%PY_EXE%" -m pip install -U %PKG%
   exit /b 10
 )
 exit /b 0
