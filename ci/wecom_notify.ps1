@@ -71,41 +71,39 @@ function Send-WecomMarkdown([string]$md){
 # Event: start
 # =========================
 if ($Event -eq "start") {
-  $DeviceId = N $DeviceId
-  $ApkJob = N $ApkJob
-  $ApkBuild = N $ApkBuild
-  $ApkPath = N $ApkPath
   $TestFilesPath = N $TestFilesPath
 
   $lines = @()
   $count = 0
+
   if (-not [string]::IsNullOrWhiteSpace($TestFilesPath) -and (Test-Path -LiteralPath $TestFilesPath)) {
     $all = Get-Content -LiteralPath $TestFilesPath -ErrorAction SilentlyContinue
     if ($null -ne $all) {
+      # 只保留 .robot
+      $all = $all | Where-Object { $_ -match '\.robot$' }
+
       $count = $all.Count
       $head = $all | Select-Object -First $MaxFiles
-      $lines = $head | ForEach-Object { "- " + $_ }
+      $lines = $head | ForEach-Object { "🧩 " + $_ }
+
       if ($count -gt $MaxFiles) {
-        $lines += ("...（共 {0} 个文件，仅展示前 {1} 个）" -f $count,$MaxFiles)
+        $lines += ("✨ 还有 {0} 个未展示（共 {1} 个，仅展示前 {2} 个）" -f ($count-$MaxFiles), $count, $MaxFiles)
       }
     }
-  } else {
-    $lines = @("（未找到测试文件清单：$TestFilesPath）")
   }
 
-  $fileBlock = ($lines -join "`n")
+  if ($count -eq 0) {
+    $lines = @("⚠️ 未找到本次将执行的 .robot 文件（或清单文件不存在）")
+  }
 
   $md = @"
-### 🟦 开始自动化测试
-- Job：**$JobName**  #$BuildNumber
-- 设备：**$DeviceId**
-- APK来源：**$ApkJob**（选择：$ApkBuild）
-- APK路径：`$ApkPath`
-- 构建页：[点击前往]($BuildPage)
-- 测试文件清单（归档后可下载）：[selected_test_files.txt]($TestPlanUrl)
+🌟🌟🌟 **自动化测试已启动** 🌟🌟🌟
+📌 Job：**$JobName**  #$BuildNumber
+🔗 构建页：[点击查看]($BuildPage)
+📄 测试清单：[selected_test_files.txt]($TestPlanUrl)
 
-#### 📄 本次将执行的测试文件（$count）
-$fileBlock
+🚀 **本次将执行的 .robot 文件（$count）**
+$($lines -join "`n")
 "@.Trim()
 
   [void](Send-WecomMarkdown $md)
