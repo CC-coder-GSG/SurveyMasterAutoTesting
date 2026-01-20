@@ -42,3 +42,10 @@ Scroll To And Tap Text Contains
     [Arguments]    ${text}
     ${loc}=    Android Scroll Into View By Text Contains    ${text}
     Tap    ${loc}
+
+Click Clear Button For Input
+# 使用xpath定位并点击输入框的清除按钮 /清除按钮无Id
+    [Arguments]    ${input_id}
+    ${xpath}=    Set Variable    //*[@resource-id="${input_id}"]/preceding-sibling::android.widget.ImageView
+    Wait Until Element Is Visible    xpath=${xpath}    5s
+    Click Element    xpath=${xpath}
