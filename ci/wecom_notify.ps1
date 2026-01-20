@@ -84,7 +84,7 @@ if ($Event -eq "start") {
 
       $count = $all.Count
       $head = $all | Select-Object -First $MaxFiles
-      $lines = $head | ForEach-Object { "🧩 " + $_ }
+      $lines = $head | ForEach-Object { "💬 " + $_ }
 
       if ($count -gt $MaxFiles) {
         $lines += ("✨ 还有 {0} 个未展示（共 {1} 个，仅展示前 {2} 个）" -f ($count-$MaxFiles), $count, $MaxFiles)
@@ -97,7 +97,7 @@ if ($Event -eq "start") {
   }
 
   $md = @"
-🌟🌟🌟 **自动化测试已启动** 🌟🌟🌟
+✈️ **自动化测试已启动** ✈️
 📌 Job：**$JobName**  #$BuildNumber
 🔗 构建页：[点击查看]($BuildPage)
 📄 测试清单：[selected_test_files.txt]($TestPlanUrl)
