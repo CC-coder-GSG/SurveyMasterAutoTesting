@@ -4,15 +4,16 @@ Resource    ../pages/CloudService.resource
 
 
 *** Keywords ***
-登录云服务流程
+#登录云服务流程
+Login Cloud Service
     [Arguments]    ${username}    ${password}
 
-    打开项目页面
-    进入云服务
-    选择用户名
-    清除用户名
-    输入用户名    ${username}
-    输入密码      ${password}
-
-    点击登录
+    Open Project Page
+    Enter Cloud Service Page
+    Select Username
+    Clear User Name
+    Input Username    ${username}
+    Input Password      ${password}
+    Select Password
+    Click Login
 
