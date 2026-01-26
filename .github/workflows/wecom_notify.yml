@@ -1,0 +1,160 @@
+name: WeCom Notify (Push + PR + Merge)
+
+on:
+  # 1) push 到指定分支通知
+  push:
+    branches:
+      - dev
+      - 'release/*'
+      - main
+      - dubhe
+      - merak
+      - phecda
+
+  # 2) PR 生命周期通知（创建/可审/重新打开/合并）
+  pull_request:
+    types: [opened, reopened, ready_for_review, closed]
+    branches: [main]
+
+jobs:
+  notify_push:
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send push message to WeCom
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          set -e
+
+          # 基本信息
+          REPO="${{ github.repository }}"
+          BRANCH="${{ github.ref_name }}"
+          ACTOR="${{ github.actor }}"
+          COMPARE_URL="${{ github.event.compare }}"
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+
+          # commit 信息（最多取 5 条，避免刷屏过长）
+          COMMITS_JSON='${{ toJson(github.event.commits) }}'
+          MSG=$(python3 - <<'PY'
+          import json, os
+          commits = json.loads(os.environ.get("COMMITS_JSON","[]"))
+          lines=[]
+          for c in commits[:5]:
+              msg = (c.get("message") or "").split("\n")[0]
+              sha = (c.get("id") or "")[:7]
+              author = (c.get("author",{}).get("name") or "")
+              lines.append(f"- `{sha}` {msg} ({author})")
+          if len(commits) > 5:
+              lines.append(f"- ...and {len(commits)-5} more")
+          print("\n".join(lines) if lines else "- (no commit details)")
+          PY
+          )
+
+          # 构建 JSON (使用 jq 避免特殊字符导致 JSON 格式错误)
+          CONTENT="🚀 **Push 通知**
+          > Repo: ${REPO}
+          > Branch: **${BRANCH}**
+          > By: ${ACTOR}
+          > Compare: [查看变更](${COMPARE_URL})
+          
+          **Commits:**
+          ${MSG}"
+          
+          jq -n --arg content "$CONTENT" '{msgtype: "markdown", markdown: {content: $content}}' > payload.json
+
+          # 发送
+          curl -sS "${WECOM_WEBHOOK}" \
+            -H 'Content-Type: application/json' \
+            -d @payload.json
+
+  notify_pr:
+    if: ${{ github.event_name == 'pull_request' && github.event.action != 'closed' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send PR created/ready message to WeCom
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          set -e
+
+          REPO="${{ github.repository }}"
+          ACTION="${{ github.event.action }}"
+          TITLE="${{ github.event.pull_request.title }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          BASE="${{ github.event.pull_request.base.ref }}"
+          HEAD="${{ github.event.pull_request.head.ref }}"
+          DRAFT="${{ github.event.pull_request.draft }}"
+
+          if [ "${ACTION}" = "opened" ]; then
+            EMOJI="🆕"
+            TAG="PR 创建"
+          elif [ "${ACTION}" = "reopened" ]; then
+            EMOJI="🔄"
+            TAG="PR 重新打开"
+          elif [ "${ACTION}" = "ready_for_review" ]; then
+            EMOJI="👀"
+            TAG="PR 可评审"
+          else
+            EMOJI="📌"
+            TAG="PR 更新"
+          fi
+
+          # 草稿 PR 的提示
+          if [ "${DRAFT}" = "true" ]; then
+            DRAFT_NOTE="（Draft）"
+          else
+            DRAFT_NOTE=""
+          fi
+
+          CONTENT="${EMOJI} **${TAG}** ${DRAFT_NOTE}
+          > Repo: ${REPO}
+          > PR: #${PR_NUM} [${TITLE}](${PR_URL})
+          > From: ${HEAD} → To: **${BASE}**
+          > Author: ${AUTHOR}
+          
+          请尽快安排评审 ✅"
+
+          jq -n --arg content "$CONTENT" '{msgtype: "markdown", markdown: {content: $content}}' > payload.json
+
+          curl -sS "${WECOM_WEBHOOK}" \
+            -H 'Content-Type: application/json' \
+            -d @payload.json
+
+  notify_merge_main:
+    # 只在 PR 被合并时通知（closed 也包含“关闭但未合并”的情况）
+    if: ${{ github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send merge-to-main message to WeCom
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+        run: |
+          set -e
+
+          REPO="${{ github.repository }}"
+          TITLE="${{ github.event.pull_request.title }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          PR_NUM="${{ github.event.pull_request.number }}"
+          AUTHOR="${{ github.event.pull_request.user.login }}"
+          MERGER="${{ github.actor }}"
+          BASE="${{ github.event.pull_request.base.ref }}"
+          HEAD="${{ github.event.pull_request.head.ref }}"
+          MERGE_SHA="${{ github.event.pull_request.merge_commit_sha }}"
+
+          CONTENT="✅ **已合并到 ${BASE}**
+          > Repo: ${REPO}
+          > PR: #${PR_NUM} [${TITLE}](${PR_URL})
+          > From: ${HEAD} → To: **${BASE}**
+          > Author: ${AUTHOR}
+          > Merged by: ${MERGER}
+          > Merge Commit: \`${MERGE_SHA:0:7}\`"
+
+          jq -n --arg content "$CONTENT" '{msgtype: "markdown", markdown: {content: $content}}' > payload.json
+
+          curl -sS "${WECOM_WEBHOOK}" \
+            -H 'Content-Type: application/json' \
+            -d @payload.json
