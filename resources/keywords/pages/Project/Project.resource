@@ -1,7 +1,7 @@
 *** Settings ***
-Resource    ../../locators/android/Project.resource
-Resource    ../common/actions.resource
-Resource    ../../locators/android/Popups.resource
+Resource    ../../../locators/android/Project.resource
+Resource    ../../common/actions.resource
+Resource    ../../../locators/android/Popups.resource
 
 
 *** Keywords ***
@@ -18,7 +18,7 @@ Enter Project Name
 #输入创建者
 Enter Project Creator
     [Arguments]    ${creator}
-    Input    ${Project.PROJECT_CREATOR_INPUT_BOX}    ${creator}}
+    Input    ${Project.PROJECT_CREATOR_INPUT_BOX}    ${creator}
 # 输入备注
 Enter Project Remark
     [Arguments]    ${remark}
