@@ -1,5 +1,5 @@
 *** Settings ***
-Resource    ../pages/CloudService.resource
+Resource    ../pages/Project/CloudService.resource
 
 
 

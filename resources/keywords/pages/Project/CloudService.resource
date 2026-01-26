@@ -1,7 +1,7 @@
 *** Settings ***
 Library    AppiumLibrary
-Resource    ../../locators/android/CloudService.resource
-Resource    ../common/actions.resource
+Resource    ../../../locators/android/CloudService.resource
+Resource    ../../common/actions.resource
 
 *** Keywords ***
 Open Project Page    # 打开项目页面

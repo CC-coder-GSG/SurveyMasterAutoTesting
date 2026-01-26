@@ -1,5 +1,5 @@
 *** Settings ***
-Resource    ../pages/GuideActivity.resource
+Resource    ../pages/Project/GuideActivity.resource
 Resource    ../pages/Project/Project.resource
 
 *** Keywords ***

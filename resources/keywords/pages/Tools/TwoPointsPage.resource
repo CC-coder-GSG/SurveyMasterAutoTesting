@@ -1,7 +1,7 @@
 *** Settings ***
-Resource    ../../locators/android/TwoPoints.resource
-Resource    ../common/actions.resource
-Resource    ../common/assert.resource
+Resource    ../../../locators/android/TwoPoints.resource
+Resource    ../../common/actions.resource
+Resource    ../../common/assert.resource
 
 *** Keywords ***
 Input Point Name

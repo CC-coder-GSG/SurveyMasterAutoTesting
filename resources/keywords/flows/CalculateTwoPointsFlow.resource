@@ -1,6 +1,6 @@
 *** Settings ***
-Resource    ../pages/ToolsPage.resource
-Resource    ../pages/TwoPointsPage.resource
+Resource    ../pages/Tools/ToolsPage.resource
+Resource    ../pages/Tools/TwoPointsPage.resource
 
 *** Keywords ***
 Calculate Two Points

@@ -1,6 +1,6 @@
 *** Settings ***
-Resource    ../../locators/android/GuideActivity.resource
-Resource    ../common/actions.resource
+Resource    ../../../locators/android/GuideActivity.resource
+Resource    ../../common/actions.resource
 
 
 *** Keywords ***
