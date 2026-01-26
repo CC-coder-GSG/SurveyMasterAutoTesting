@@ -1,6 +1,6 @@
 *** Settings ***
 Resource    ../pages/GuideActivity.resource
-Resource    ../pages/Project.resource
+Resource    ../pages/Project/Project.resource
 
 *** Keywords ***
 # 创建一个新项目并删除
