@@ -1,26 +1,29 @@
 *** Settings ***
 Resource    ../../../locators/android/TwoPoints.resource
 Resource    ../../common/actions.resource
-Resource    ../../common/assert.resource
 
 *** Keywords ***
 Input Point Name
 # 输入点名
     [Arguments]    ${POINT_NAME_INPUT_BOX}    ${point_name}
-    Input    ${POINT_NAME_INPUT_BOX}    ${point_name}
+    Click Element    ${POINT_NAME_INPUT_BOX}
+    Input Text    ${POINT_NAME_INPUT_BOX}    ${point_name}
 
 Input N
 # 输入N坐标
     [Arguments]     ${N_INPUT_BOX}    ${n}
-    Input   ${N_INPUT_BOX}    ${n}
+    Click Element    ${N_INPUT_BOX}
+    Input Text   ${N_INPUT_BOX}    ${n}
 Input E
 # 输入E坐标
     [Arguments]     ${E_INPUT_BOX}    ${e}
-    Input   ${E_INPUT_BOX}    ${e}
+    Click Element    ${E_INPUT_BOX}
+    Input Text   ${E_INPUT_BOX}    ${e}
 Input Z
 # 输入Z坐标
     [Arguments]     ${Z_INPUT_BOX}    ${z}
-    Input   ${Z_INPUT_BOX}    ${z}
+    Click Element    ${Z_INPUT_BOX}
+    Input Text   ${Z_INPUT_BOX}    ${z}
 
 Input Point Information
 # 输入点信息（点名，N，E，Z）
