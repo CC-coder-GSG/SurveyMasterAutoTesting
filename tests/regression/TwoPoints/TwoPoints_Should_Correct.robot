@@ -5,4 +5,4 @@ Resource    ../../../resources/keywords/common/teardown.resource
 
 *** Test Cases ***
 TwoPoints_Should_Correct
-    Run And Reset    Calculate Two Points Distance
+    Run And Reset    Calculate Two Points
