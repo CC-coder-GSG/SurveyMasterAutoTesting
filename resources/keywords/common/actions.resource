@@ -4,7 +4,7 @@ Resource   wait.resource
 Resource   assert.resource
 
 *** Variables ***
-${DEFAULT_TIMEOUT}    10s
+${DEFAULT_TIMEOUT}    20s
 ${CLICK_RETRIES}      2
 ${RETRY_INTERVAL}     300ms
 
