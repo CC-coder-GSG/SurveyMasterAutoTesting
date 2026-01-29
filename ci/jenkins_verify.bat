@@ -146,7 +146,7 @@ if errorlevel 1 (
 echo [OK] Appium is ready on %APPIUM_PORT%.
 
 echo [INFO] ===== RUN ROBOT =====
-if "%SUITE%"=="" set "SUITE=CreateNewProject"
+if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
 if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
 
 echo [INFO] CMD=%PY_EXE% -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%

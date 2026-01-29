@@ -31,14 +31,43 @@ Tap By Text Contains
     ${loc}=    Set Variable    android=new UiSelector().textContains("${text}")
     Tap    ${loc}
 
+*** Keywords ***
 Android Scroll Into View By Text Contains
-# 滚动直到某个文字出现，并返回定位器，解决问题：元素在列表/滚动页下方，看不到也点不到、用 UiScrollable 自动滚动定位，比手写 swipe 可靠
-    [Arguments]    ${text}
-    ${loc}=    Set Variable    android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().textContains("${text}"))
+    [Documentation]    滚动查找文本（全能版）。
+    ...    
+    ...    [参数 container_locator 支持三种情况]:
+    ...    1. 不传 (默认): 也就是 ${EMPTY}，会在全屏寻找第一个可滚动的区域。
+    ...    2. RF 标准写法: id=com.xxx:id/list，会自动转换为 resourceId。
+    ...    3. 原生 Java 写法: new UiSelector().resourceId("...")，直接透传。
+    [Arguments]    ${text}    ${container_locator}=${EMPTY}
+    
+    # 1. 情况 A: 用户没有传定位器 -> 默认全屏寻找可滚动的元素
+    IF    '${container_locator}' == '${EMPTY}'
+        ${selector_java}=    Set Variable    new UiSelector().scrollable(true)
+    
+    # 2. 情况 B: 用户传入了原生 Java 选择器 -> 直接使用
+    # 使用 Python 表达式 $var.strip().startswith(...) 更加稳健
+    ELSE IF    $container_locator.strip().startswith('new UiSelector')
+        ${selector_java}=    Set Variable    ${container_locator}
+        
+    # 3. 情况 C: 用户传入了 RF 标准 id=xxx -> 翻译成 Java 的 resourceId("xxx")
+    ELSE IF    $container_locator.startswith('id=')
+        ${clean_id}=    Set Variable    ${container_locator}[3:]
+        ${selector_java}=    Set Variable    new UiSelector().resourceId("${clean_id}")
+        
+    # 4. 情况 D: 格式不支持 (比如传入了 xpath 或纯字符串) -> 报错提示
+    ELSE
+        Fail    错误: 滚动定位器格式不正确。仅支持 'id=...' 或 'new UiSelector()...'，或者留空。你传入的是: ${container_locator}
+    END
+    
+    # 5. 组装最终命令
+    # .instance(0) 确保在有多个匹配时默认取第一个，防止报错
+    ${loc}=    Set Variable    android=new UiScrollable(${selector_java}.instance(0)).setMaxSearchSwipes(10).scrollIntoView(new UiSelector().textContains("${text}"))
+    
     RETURN    ${loc}
 
 Scroll To And Tap Text Contains
-# 滚动到文字出现后点击（组合动作）
-    [Arguments]    ${text}
-    ${loc}=    Android Scroll Into View By Text Contains    ${text}
-    Tap    ${loc}
+    [Arguments]    ${text}    ${container_locator}=${EMPTY}
+    ${loc}=    Android Scroll Into View By Text Contains    ${text}    ${container_locator}
+    Wait Until Element Is Visible    ${loc}    timeout=5s
+    Click Element    ${loc}
