@@ -13,3 +13,5 @@
 ...    Fix_Status=id=com.sinognss.sm.free:id/tv_solution_status
 # 设备信息功能按钮
 ...    Equipment_BUTTON=android=new UiSelector().text("设备信息")
+# 设备连接功能按钮
+...    Device_Connect_BUTTON=android=new UiSelector().text("连接设备")

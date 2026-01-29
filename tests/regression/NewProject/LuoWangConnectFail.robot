@@ -1,14 +1,22 @@
 *** Settings ***
 Resource    ../../../resources/keywords/common/flow_helper.resource
 Resource    ../../../resources/keywords/common/teardown.resource
+Resource    ../../../resources/keywords/common/PopupHandle.resource
 Resource    ../../../resources/keywords/flows/WanXiangConnect.resource
 Resource    ../../../resources/keywords/flows/EquipmentInformation.resource
 Resource    ../../../resources/keywords/flows/ConnectDevice.resource
+Resource    ../../../resources/keywords/pages/Equipment/ConnectDevice.resource
+
 
 
 *** Test Cases ***
 LuoWang Connect Stability Test
     [Documentation]    接入司南万象压测：循环100次，累计3次断言失败则停止。
+
+    # 处理用户协议弹窗
+    Handle Privacy Agreement
+    # 连接蓝牙设备
+    Connect A Device
     
     # 1. 初始化失败计数器
     ${fail_count}    Set Variable    0

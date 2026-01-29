@@ -5,3 +5,5 @@
 ...    Restart=android=new UiSelector().className("android.view.ViewGroup").instance(8)
 # 深度重启按钮
 ...    Deep_Restart=id=com.sinognss.sm.free:id/btn_freset
+# 功能界面滑动列表容器
+...    Swipe_Container=id=com.sinognss.sm.free:id/rv_device_info

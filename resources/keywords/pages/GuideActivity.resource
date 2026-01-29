@@ -23,3 +23,7 @@ Fix Status Get
 EquipmentInformation Button Click
 # 点击设备信息按钮
     Tap    ${GuideActivity.Equipment_BUTTON}
+
+DeviceConnect Button Click
+# 点击设备连接按钮
+    Tap    ${GuideActivity.Device_Connect_BUTTON}
