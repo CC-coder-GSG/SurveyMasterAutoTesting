@@ -2,13 +2,11 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem ============================================================
-rem Jenkins verify runner (WORKSPACE results + CALL-safe)
-rem - Force Python 3.14
-rem - CALL every .cmd/.bat invocation (npm/appium)
-rem - Output reports to %WORKSPACE%\results
-rem - Return non-zero on failures (Jenkinsfile catchError => UNSTABLE)
-rem - ENCRYPTION-SAFE device check: DO NOT parse adb text output
-rem - Robust Appium stop: kill port + kill node.exe whose cmdline contains appium
+rem Jenkins verify runner (FINAL STABLE)
+rem - No "goto" inside (...) blocks
+rem - ENCRYPTION-SAFE device check: do not parse adb devices output
+rem - ADB calls via PowerShell Start-Process + timeout + exitcode
+rem - Appium: start with PID recorded, stop by killing process tree
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -26,14 +24,14 @@ rem ---- Project root (autotest) ----
 set "ROOT=%~dp0.."
 set "BAT=%~f0"
 
-rem ---- WORKSPACE results dir (preferred) ----
+rem ---- WORKSPACE results dir ----
 if not "%WORKSPACE%"=="" (
   set "OUTDIR=%WORKSPACE%\results"
 ) else (
   set "OUTDIR=%ROOT%\..\results"
 )
 
-rem ---- ADB: prefer ANDROID_HOME, else default ----
+rem ---- ADB ----
 if "%ANDROID_HOME%"=="" set "ANDROID_HOME=D:\android-sdk"
 set "ADB_EXE=%ANDROID_HOME%\platform-tools\adb.exe"
 
@@ -42,43 +40,47 @@ if "%APPIUM_PORT%"=="" set "APPIUM_PORT=4723"
 if "%DEVICE_ID%"=="" set "DEVICE_ID=4e83cae7"
 set "ROBOT_RC=0"
 
+rem ---- Files ----
+set "APPIUM_LOG=%OUTDIR%\appium.log"
+set "APPIUM_PID_FILE=%OUTDIR%\appium.pid"
+set "ARGFILE=%OUTDIR%\robot_args.txt"
+
 echo [INFO] ===== START jenkins_verify.bat =====
 echo [INFO] BAT=%BAT%
-echo [INFO] ROOT=%ROOT%
-echo [INFO] WORKSPACE=%WORKSPACE%
 echo [INFO] OUTDIR=%OUTDIR%
-echo [INFO] ANDROID_HOME=%ANDROID_HOME%
 echo [INFO] ADB_EXE=%ADB_EXE%
 echo [INFO] DEVICE_ID=%DEVICE_ID%
 echo [INFO] APPIUM_PORT=%APPIUM_PORT%
 
-pushd "%ROOT%" || (
-  echo [ERROR] Cannot cd to project root.
-  exit /b 1
-)
+pushd "%ROOT%" || ( echo [ERROR] Cannot cd to project root. & exit /b 1 )
 
-rem ---- Ensure output dir ----
 if not exist "%OUTDIR%" mkdir "%OUTDIR%"
 
 rem ---- Python check ----
 echo [INFO] ===== PYTHON CHECK =====
-echo [INFO] PY_EXE="%PY_EXE%"
-"%PY_EXE%" -V || (popd & exit /b 1)
-"%PY_EXE%" -c "import sys; print('sys.executable=', sys.executable)" || (popd & exit /b 1)
+"%PY_EXE%" -V || ( set "ROBOT_RC=1" & goto finally )
 
-rem ---- Python deps check ----
+rem ---- Python deps ----
 echo [INFO] ===== PYTHON DEPS CHECK =====
-call :check_pip_pkg robotframework || (set "ROBOT_RC=10" & goto :finally)
-call :check_pip_pkg robotframework-appiumlibrary || (set "ROBOT_RC=10" & goto :finally)
-call :check_pip_pkg pyyaml || (set "ROBOT_RC=10" & goto :finally)
+call :check_pip_pkg robotframework
+if errorlevel 1 ( set "ROBOT_RC=10" & goto finally )
+
+call :check_pip_pkg robotframework-appiumlibrary
+if errorlevel 1 ( set "ROBOT_RC=10" & goto finally )
+
+call :check_pip_pkg pyyaml
+if errorlevel 1 ( set "ROBOT_RC=10" & goto finally )
 
 rem ---- Env check ----
 echo [INFO] ===== ENV CHECK =====
-where node || (echo [ERROR] node not found in PATH. & set "ROBOT_RC=2" & goto :finally)
+where node >nul 2>&1
+if errorlevel 1 ( echo [ERROR] node not found in PATH. & set "ROBOT_RC=2" & goto finally )
 node -v
 
-where npm || (echo [ERROR] npm not found in PATH. & set "ROBOT_RC=2" & goto :finally)
-call npm -v || (echo [ERROR] npm failed to run. & set "ROBOT_RC=2" & goto :finally)
+where npm >nul 2>&1
+if errorlevel 1 ( echo [ERROR] npm not found in PATH. & set "ROBOT_RC=2" & goto finally )
+call npm -v >nul 2>&1
+if errorlevel 1 ( echo [ERROR] npm failed to run. & set "ROBOT_RC=2" & goto finally )
 
 rem ---- Locate appium.cmd ----
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
@@ -90,101 +92,114 @@ if not exist "%APPIUM_CMD%" (
   echo [ERROR] appium command not found.
   echo [HINT] Run: npm i -g appium
   set "ROBOT_RC=2"
-  goto :finally
+  goto finally
 )
 
-call "%APPIUM_CMD%" -v || (
-  echo [ERROR] Appium CLI failed. Check node/npm/appium installation.
-  set "ROBOT_RC=2"
-  goto :finally
-)
-
-rem ---- Device check (ENCRYPTION-SAFE: no parsing adb text output) ----
+rem ---- Device check (ENCRYPTION-SAFE) ----
 echo [INFO] ===== CHECK DEVICE (encryption-safe) =====
 if not exist "%ADB_EXE%" (
   echo [ERROR] adb.exe not found at: %ADB_EXE%
-  echo [HINT] Set ANDROID_HOME in Jenkins or ensure D:\android-sdk exists.
   set "ROBOT_RC=3"
-  goto :finally
+  goto finally
 )
 
-"%ADB_EXE%" start-server >nul 2>&1
+rem Restart adb in a safe way (avoid daemon banner breaking wrapper)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$adb='%ADB_EXE%';" ^
+  "try{ $p=Start-Process -FilePath $adb -ArgumentList @('kill-server') -NoNewWindow -PassThru; $p.WaitForExit(10)|Out-Null }catch{}" ^
+  "$p=Start-Process -FilePath $adb -ArgumentList @('start-server') -NoNewWindow -PassThru;" ^
+  "if($p.WaitForExit(15)){ exit $p.ExitCode } else { try{$p.Kill()}catch{}; exit 124 }" >nul 2>&1
 
-rem 1) wait-for-device with timeout (20s)
+if errorlevel 124 (
+  echo [ERROR] adb start-server timeout (15s)
+  set "ROBOT_RC=3"
+  goto finally
+)
+
+rem 1) wait-for-device (20s timeout)
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$adb='%ADB_EXE%'; $id='%DEVICE_ID%';" ^
-  "$p = Start-Process -FilePath $adb -ArgumentList @('-s',$id,'wait-for-device') -NoNewWindow -PassThru;" ^
+  "$p=Start-Process -FilePath $adb -ArgumentList @('-s',$id,'wait-for-device') -NoNewWindow -PassThru;" ^
   "if($p.WaitForExit(20)){ exit $p.ExitCode } else { try{$p.Kill()}catch{}; exit 124 }" >nul 2>&1
 
 if errorlevel 124 (
   echo [ERROR] adb wait-for-device timeout (20s): %DEVICE_ID%
   set "ROBOT_RC=3"
-  goto :finally
+  goto finally
 )
 
-rem 2) get-state check inside PowerShell, only uses exitcode (no stdout parse in bat)
+rem 2) get-state (10s timeout)
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$adb='%ADB_EXE%'; $id='%DEVICE_ID%';" ^
-  "$p = Start-Process -FilePath $adb -ArgumentList @('-s',$id,'get-state') -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $env:TEMP ('adb_state_'+$id+'.txt'));" ^
+  "$adb='%ADB_EXE%'; $id='%DEVICE_ID%'; $tmp=Join-Path $env:TEMP ('adb_state_'+$id+'.txt');" ^
+  "try{ if(Test-Path $tmp){Remove-Item -Force $tmp -ErrorAction SilentlyContinue} }catch{}" ^
+  "$p=Start-Process -FilePath $adb -ArgumentList @('-s',$id,'get-state') -NoNewWindow -PassThru -RedirectStandardOutput $tmp;" ^
   "if(-not $p.WaitForExit(10)){ try{$p.Kill()}catch{}; exit 124 }" ^
-  "$s = (Get-Content (Join-Path $env:TEMP ('adb_state_'+$id+'.txt')) -ErrorAction SilentlyContinue | Select-Object -First 1).Trim();" ^
-  "if($s -ieq 'device'){ exit 0 } else { exit 3 }" >nul 2>&1
+  "$s=(Get-Content $tmp -ErrorAction SilentlyContinue | Select-Object -First 1);" ^
+  "if(($s -as [string]).Trim().ToLower() -eq 'device'){ exit 0 } else { exit 3 }" >nul 2>&1
 
 if errorlevel 124 (
   echo [ERROR] adb get-state timeout (10s): %DEVICE_ID%
   set "ROBOT_RC=3"
-  goto :finally
+  goto finally
 )
 if errorlevel 3 (
   echo [ERROR] device not in 'device' state (offline/unauthorized/not found): %DEVICE_ID%
-  echo [HINT] Check phone authorization prompt / replug USB / restart adb.
   set "ROBOT_RC=3"
-  goto :finally
+  goto finally
 )
 
-rem 3) sanity: adb shell (exitcode only)
-"%ADB_EXE%" -s %DEVICE_ID% shell "echo ok" >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] adb shell not available for %DEVICE_ID% (unauthorized/offline?)
+rem 3) sanity shell (exitcode only)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$adb='%ADB_EXE%'; $id='%DEVICE_ID%';" ^
+  "$p=Start-Process -FilePath $adb -ArgumentList @('-s',$id,'shell','echo','ok') -NoNewWindow -PassThru;" ^
+  "if($p.WaitForExit(10)){ exit $p.ExitCode } else { try{$p.Kill()}catch{}; exit 124 }" >nul 2>&1
+
+if errorlevel 124 (
+  echo [ERROR] adb shell timeout (10s): %DEVICE_ID%
   set "ROBOT_RC=3"
-  goto :finally
+  goto finally
+)
+if errorlevel 1 (
+  echo [ERROR] adb shell not available (unauthorized/offline?): %DEVICE_ID%
+  set "ROBOT_RC=3"
+  goto finally
 )
 
 echo [OK] Device "%DEVICE_ID%" is online (device).
 
-rem ---- Appium start ----
-echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
-call :kill_port %APPIUM_PORT%
+rem ---- Stop any leftovers ----
+call :stop_appium %APPIUM_PORT%
 
+rem ---- Start Appium (record PID) ----
 echo [INFO] ===== START APPIUM =====
-set "APPIUM_LOG=%OUTDIR%\appium.log"
-echo [INFO] APPIUM_CMD=%APPIUM_CMD%
-echo [INFO] APPIUM_LOG=%APPIUM_LOG%
+if exist "%APPIUM_PID_FILE%" del /f /q "%APPIUM_PID_FILE%" >nul 2>&1
+if exist "%APPIUM_LOG%" del /f /q "%APPIUM_LOG%" >nul 2>&1
 
-start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$cmd='cmd.exe';" ^
+  "$args='/c call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1';" ^
+  "$p=Start-Process -FilePath $cmd -ArgumentList $args -WindowStyle Hidden -PassThru;" ^
+  "Set-Content -Path '%APPIUM_PID_FILE%' -Value $p.Id -Encoding ASCII" >nul 2>&1
+
 timeout /t 2 /nobreak >nul
 
-echo [INFO] ===== WAIT APPIUM READY =====
 call :wait_port %APPIUM_PORT% 90
 if errorlevel 1 (
   echo [ERROR] Appium not ready on port %APPIUM_PORT% within timeout.
-  echo [HINT] Check log: %APPIUM_LOG%
+  echo [HINT] Check: %APPIUM_LOG%
   set "ROBOT_RC=4"
-  goto :finally
+  goto finally
 )
-echo [OK] Appium is ready on %APPIUM_PORT%.
+echo [OK] Appium is ready.
 
 rem ---- Run Robot ----
 echo [INFO] ===== RUN ROBOT =====
-set "ARGFILE=%OUTDIR%\robot_args.txt"
-
 if exist "%ARGFILE%" (
   echo [INFO] Using argument file: %ARGFILE%
   "%PY_EXE%" -m robot -A "%ARGFILE%"
 ) else (
   if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
   if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
-  echo [INFO] CMD=%PY_EXE% -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
   "%PY_EXE%" -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
 )
 set "ROBOT_RC=%ERRORLEVEL%"
@@ -193,30 +208,26 @@ set "ROBOT_RC=%ERRORLEVEL%"
 echo [INFO] ===== STOP APPIUM =====
 call :stop_appium %APPIUM_PORT%
 
-echo [INFO] ===== RESULT FILES IN OUTDIR =====
-if exist "%OUTDIR%\output.xml" (
-  echo [OK] output.xml exists: %OUTDIR%\output.xml
-) else (
-  echo [WARN] output.xml missing in: %OUTDIR%
-)
-dir /a /-c "%OUTDIR%"
+echo [INFO] ===== RESULT FILES (exist check) =====
+if exist "%OUTDIR%\output.xml" echo [INFO] output.xml OK
+if exist "%OUTDIR%\report.html" echo [INFO] report.html OK
+if exist "%OUTDIR%\log.html" echo [INFO] log.html OK
+if exist "%OUTDIR%\appium.log" echo [INFO] appium.log OK
 
 echo [INFO] ===== END jenkins_verify.bat ROBOT_RC=%ROBOT_RC% =====
 popd
-
 exit /b %ROBOT_RC%
 
-rem ============================================================
+rem ===========================
 rem Subroutines
-rem ============================================================
+rem ===========================
 
 :check_pip_pkg
 set "PKG=%~1"
 "%PY_EXE%" -m pip show "%PKG%" >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Python package not installed: %PKG%
-  echo [HINT] Run: "%PY_EXE%" -m pip install -U %PKG%
-  exit /b 10
+  exit /b 1
 )
 exit /b 0
 
@@ -231,7 +242,7 @@ exit /b 0
 set "PORT=%~1"
 set "SECONDS=%~2"
 for /l %%i in (1,1,%SECONDS%) do (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "try{ $c = New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try{ $c=New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
   if not errorlevel 1 exit /b 0
   timeout /t 1 /nobreak >nul
 )
@@ -239,11 +250,23 @@ exit /b 1
 
 :stop_appium
 set "PORT=%~1"
+
+rem 1) kill by recorded PID tree
+if exist "%APPIUM_PID_FILE%" (
+  for /f "usebackq delims=" %%x in ("%APPIUM_PID_FILE%") do set "APPIUM_PID=%%x"
+  if not "%APPIUM_PID%"=="" (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+      "$pid=%APPIUM_PID%;" ^
+      "try{ taskkill /PID $pid /T /F | Out-Null }catch{}" >nul 2>&1
+  )
+)
+
+rem 2) kill port listener
 call :kill_port %PORT%
 
-rem Kill only node.exe processes that are running appium (safer than killing all node.exe)
+rem 3) kill only node.exe processes running appium (safe)
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ps = Get-CimInstance Win32_Process -Filter ""Name='node.exe'"" | Where-Object { $_.CommandLine -match 'appium' };" ^
+  "$ps=Get-CimInstance Win32_Process -Filter ""Name='node.exe'"" | Where-Object { $_.CommandLine -match 'appium' };" ^
   "foreach($p in $ps){ try{ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }catch{} }" >nul 2>&1
 
 exit /b 0
