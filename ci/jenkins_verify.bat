@@ -5,8 +5,9 @@ rem ============================================================
 rem Jenkins verify runner (WORKSPACE results + CALL-safe)
 rem - Force Python 3.14
 rem - CALL every .cmd/.bat invocation (npm/appium)
-rem - Output reports to %WORKSPACE%\results (single source of truth)
-rem - Return non-zero on failures (let Jenkinsfile mark UNSTABLE)
+rem - Output reports to %WORKSPACE%\results
+rem - Return non-zero on failures (Jenkinsfile catchError => UNSTABLE)
+rem - Robust device state check (handles TAB/spaces)
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -70,6 +71,7 @@ where node || (echo [ERROR] node not found in PATH. & popd & exit /b 2)
 node -v
 
 where npm || (echo [ERROR] npm not found in PATH. & popd & exit /b 2)
+rem IMPORTANT: npm is npm.cmd, must CALL
 call npm -v || (echo [ERROR] npm failed to run. & popd & exit /b 2)
 
 rem ---- Locate appium.cmd ----
@@ -85,6 +87,7 @@ if not exist "%APPIUM_CMD%" (
   exit /b 2
 )
 
+rem IMPORTANT: appium.cmd must be invoked with CALL
 call "%APPIUM_CMD%" -v || (
   echo [ERROR] Appium CLI failed. Check node/npm/appium installation.
   popd
@@ -107,14 +110,27 @@ if not exist "%ADB_EXE%" (
 
 "%ADB_EXE%" start-server >nul 2>&1
 
-rem 更严格：必须是 device 状态（避免 offline/unauthorized 误判）
-"%ADB_EXE%" devices | findstr /r /i "^%DEVICE_ID%[ ]\+device$" >nul 2>&1
-if errorlevel 1 (
+rem ✅ Robust parse: handles TAB/spaces in adb output
+set "OK_DEVICE="
+for /f "tokens=1,2" %%a in ('"%ADB_EXE%" devices ^| findstr /i "%DEVICE_ID%"') do (
+  if /i "%%a"=="%DEVICE_ID%" if /i "%%b"=="device" set "OK_DEVICE=1"
+)
+if not defined OK_DEVICE (
   echo [ERROR] DEVICE_ID not in device state: %DEVICE_ID%
   echo [HINT] Run: "%ADB_EXE%" devices
   popd
   exit /b 3
 )
+
+rem 双保险：get-state
+set "STATE="
+for /f "delims=" %%s in ('"%ADB_EXE%" -s %DEVICE_ID% get-state 2^>nul') do set "STATE=%%s"
+if /i not "%STATE%"=="device" (
+  echo [ERROR] get-state is "%STATE%", not ready.
+  popd
+  exit /b 3
+)
+
 echo [OK] Device "%DEVICE_ID%" is online (device).
 
 rem ---- Appium port ----
@@ -128,6 +144,7 @@ set "APPIUM_LOG=%OUTDIR%\appium.log"
 echo [INFO] APPIUM_CMD=%APPIUM_CMD%
 echo [INFO] APPIUM_LOG=%APPIUM_LOG%
 
+rem IMPORTANT: start + cmd /c + CALL appium.cmd
 start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
 timeout /t 2 /nobreak >nul
 
@@ -170,7 +187,7 @@ dir /a /-c "%OUTDIR%"
 echo [INFO] ===== END jenkins_verify.bat ROBOT_RC=%ROBOT_RC% =====
 popd
 
-rem ✅ 返回真实退出码，让 Jenkinsfile 把它标黄
+rem ✅ Return real exit code (Jenkinsfile catchError => UNSTABLE)
 exit /b %ROBOT_RC%
 
 rem ============================================================
