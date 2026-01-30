@@ -3,8 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 rem ============================================================
 rem Jenkins verify runner (FINAL)
-rem - encryption-safe: do not parse adb text output
-rem - robust adb: kill adb.exe + free 5037 + retry start-server
+rem - encryption-safe: DO NOT parse adb text in bat
+rem - avoid long powershell -Command with ^ continuations (causes exit 255)
 rem ============================================================
 
 set "PY_HOME=C:\Python314"
@@ -40,34 +40,32 @@ echo [INFO] ADB_EXE=%ADB_EXE%
 echo [INFO] DEVICE_ID=%DEVICE_ID%
 echo [INFO] APPIUM_PORT=%APPIUM_PORT%
 
-pushd "%ROOT%" || ( echo [ERROR] Cannot cd to project root. & exit /b 1 )
+pushd "%ROOT%" || (echo [ERROR] Cannot cd to project root. & exit /b 1)
 if not exist "%OUTDIR%" mkdir "%OUTDIR%"
 
 echo [INFO] ===== PYTHON CHECK =====
-"%PY_EXE%" -V || ( set "ROBOT_RC=1" & goto :finally )
+"%PY_EXE%" -V || (set "ROBOT_RC=1" & goto :finally)
 
 echo [INFO] ===== PYTHON DEPS CHECK =====
-call :check_pip_pkg robotframework
-if errorlevel 1 ( set "ROBOT_RC=10" & goto :finally )
-call :check_pip_pkg robotframework-appiumlibrary
-if errorlevel 1 ( set "ROBOT_RC=10" & goto :finally )
-call :check_pip_pkg pyyaml
-if errorlevel 1 ( set "ROBOT_RC=10" & goto :finally )
+call :check_pip_pkg robotframework || (set "ROBOT_RC=10" & goto :finally)
+call :check_pip_pkg robotframework-appiumlibrary || (set "ROBOT_RC=10" & goto :finally)
+call :check_pip_pkg pyyaml || (set "ROBOT_RC=10" & goto :finally)
 
 echo [INFO] ===== ENV CHECK =====
-where node >nul 2>&1 || ( echo [ERROR] node not found & set "ROBOT_RC=2" & goto :finally )
+where node >nul 2>&1 || (echo [ERROR] node not found. & set "ROBOT_RC=2" & goto :finally)
 node -v
-where npm >nul 2>&1 || ( echo [ERROR] npm not found & set "ROBOT_RC=2" & goto :finally )
-call npm -v >nul 2>&1 || ( echo [ERROR] npm failed & set "ROBOT_RC=2" & goto :finally )
+where npm >nul 2>&1 || (echo [ERROR] npm not found. & set "ROBOT_RC=2" & goto :finally)
+call npm -v >nul 2>&1 || (echo [ERROR] npm failed. & set "ROBOT_RC=2" & goto :finally)
 
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not exist "%APPIUM_CMD%" (
   for /f "delims=" %%p in ('where appium 2^>nul') do set "APPIUM_CMD=%%p"
 )
 if not exist "%APPIUM_CMD%" (
-  echo [ERROR] appium command not found. Run: npm i -g appium
+  echo [ERROR] appium command not found.
+  echo [HINT] Run: npm i -g appium
   set "ROBOT_RC=2"
-  goto :finally hooking
+  goto :finally
 )
 
 echo [INFO] ===== CHECK DEVICE (encryption-safe) =====
@@ -77,43 +75,43 @@ if not exist "%ADB_EXE%" (
   goto :finally
 )
 
-call :adb_restart
-if errorlevel 1 (
-  echo [ERROR] adb restart failed.
+rem --- write temp ps1 (avoid cmd-line quoting issues) ---
+set "PS_CHECK=%TEMP%\jenkins_adb_check_%RANDOM%.ps1"
+> "%PS_CHECK%" (
+  echo param([string]$Adb,[string]$Id)
+  echo $ErrorActionPreference = 'Stop'
+  echo if([string]::IsNullOrWhiteSpace($Adb) -or -not (Test-Path $Adb)) { exit 3 }
+  echo if([string]::IsNullOrWhiteSpace($Id)) { exit 3 }
+  echo ^
+  echo # start-server via cmd.exe to swallow stderr
+  echo $cmd = 'cmd.exe'
+  echo Start-Process -FilePath $cmd -ArgumentList @('/c', ('""{0}"" kill-server 1^>nul 2^>nul' -f $Adb)) -NoNewWindow -Wait ^| Out-Null
+  echo Start-Process -FilePath $cmd -ArgumentList @('/c', ('""{0}"" start-server 1^>nul 2^>nul' -f $Adb)) -NoNewWindow -Wait ^| Out-Null
+  echo Start-Sleep -Seconds 1
+  echo ^
+  echo # wait-for-device (timeout 30s)
+  echo $p = Start-Process -FilePath $Adb -ArgumentList @('-s',$Id,'wait-for-device') -NoNewWindow -PassThru
+  echo if(-not $p.WaitForExit(30000)) { try{$p.Kill()}catch{}; exit 124 }
+  echo ^
+  echo # get-state
+  echo $p2 = Start-Process -FilePath $Adb -ArgumentList @('-s',$Id,'get-state') -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $env:TEMP ('adb_state_'+$Id+'.txt'))
+  echo if(-not $p2.WaitForExit(15000)) { try{$p2.Kill()}catch{}; exit 124 }
+  echo $s = (Get-Content (Join-Path $env:TEMP ('adb_state_'+$Id+'.txt')) -ErrorAction SilentlyContinue ^| Select-Object -First 1)
+  echo $s = ($s + '').Trim()
+  echo if($s -ieq 'device') { exit 0 } else { exit 3 }
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_CHECK%" -Adb "%ADB_EXE%" -Id "%DEVICE_ID%"
+set "PS_RC=%ERRORLEVEL%"
+del /f /q "%PS_CHECK%" >nul 2>&1
+
+if "%PS_RC%"=="124" (
+  echo [ERROR] adb wait/get-state timeout: %DEVICE_ID%
   set "ROBOT_RC=3"
   goto :finally
 )
-
-rem wait-for-device (20s)
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$adb='%ADB_EXE%'; $id='%DEVICE_ID%';" ^
-  "$p = Start-Process -FilePath $adb -ArgumentList @('-s',$id,'wait-for-device') -NoNewWindow -PassThru -RedirectStandardOutput ($env:TEMP+'\\wf_out.txt') -RedirectStandardError ($env:TEMP+'\\wf_err.txt');" ^
-  "if($p.WaitForExit(20000)){ exit $p.ExitCode } else { try{$p.Kill()}catch{}; exit 124 }" >nul 2>&1
-
-if errorlevel 124 (
-  echo [ERROR] adb wait-for-device timeout (20s): %DEVICE_ID%
-  set "ROBOT_RC=3"
-  goto :finally
-)
-
-rem get-state (10s) - check inside ps, do not parse in bat
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$adb='%ADB_EXE%'; $id='%DEVICE_ID%';" ^
-  "$tmp = Join-Path $env:TEMP ('adb_state_'+$id+'.txt');" ^
-  "$p = Start-Process -FilePath $adb -ArgumentList @('-s',$id,'get-state') -NoNewWindow -PassThru -RedirectStandardOutput $tmp -RedirectStandardError ($env:TEMP+'\\gs_err.txt');" ^
-  "if(-not $p.WaitForExit(10000)){ try{$p.Kill()}catch{}; exit 124 }" ^
-  "$s = (Get-Content $tmp -ErrorAction SilentlyContinue | Select-Object -First 1);" ^
-  "if($null -eq $s){ exit 3 }" ^
-  "$s = $s.Trim();" ^
-  "if($s -ieq 'device'){ exit 0 } else { exit 3 }" >nul 2>&1
-
-if errorlevel 124 (
-  echo [ERROR] adb get-state timeout (10s): %DEVICE_ID%
-  set "ROBOT_RC=3"
-  goto :finally
-)
-if errorlevel 3 (
-  echo [ERROR] device not in 'device' state (offline/unauthorized/not found): %DEVICE_ID%
+if not "%PS_RC%"=="0" (
+  echo [ERROR] device not ready (offline/unauthorized/not found): %DEVICE_ID%
   set "ROBOT_RC=3"
   goto :finally
 )
@@ -128,14 +126,12 @@ set "APPIUM_LOG=%OUTDIR%\appium.log"
 start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
 timeout /t 3 /nobreak >nul
 
-echo [INFO] ===== WAIT APPIUM READY =====
 call :wait_port %APPIUM_PORT% 90
 if errorlevel 1 (
-  echo [ERROR] Appium not ready on %APPIUM_PORT%.
+  echo [ERROR] Appium not ready on port %APPIUM_PORT%
   set "ROBOT_RC=4"
   goto :finally
 )
-
 echo [OK] Appium is ready.
 
 echo [INFO] ===== RUN ROBOT =====
@@ -153,23 +149,14 @@ set "ROBOT_RC=%ERRORLEVEL%"
 echo [INFO] ===== STOP APPIUM =====
 call :stop_appium %APPIUM_PORT%
 
-echo [INFO] ===== RESULT FILES (exist check) =====
-if exist "%OUTDIR%\output.xml" echo [OK] output.xml: %OUTDIR%\output.xml
-dir /a /-c "%OUTDIR%" >nul 2>&1
-
 echo [INFO] ===== END jenkins_verify.bat ROBOT_RC=%ROBOT_RC% =====
 popd
 exit /b %ROBOT_RC%
 
-rem ================= Subroutines =================
-
 :check_pip_pkg
 set "PKG=%~1"
 "%PY_EXE%" -m pip show "%PKG%" >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] Python package not installed: %PKG%
-  exit /b 1
-)
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :kill_port
@@ -195,40 +182,4 @@ call :kill_port %PORT%
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ps = Get-CimInstance Win32_Process -Filter ""Name='node.exe'"" | Where-Object { $_.CommandLine -match 'appium' };" ^
   "foreach($p in $ps){ try{ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }catch{} }" >nul 2>&1
-exit /b 0
-
-:adb_restart
-rem 1) kill any adb.exe
-taskkill /F /IM adb.exe >nul 2>&1
-
-rem 2) free port 5037 if occupied
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":5037 " 2^>nul') do (
-  taskkill /F /PID %%p >nul 2>&1
-)
-
-rem 3) try kill-server/start-server with retries
-set "TRY=0"
-:adb_retry
-set /a TRY+=1
-if %TRY% GTR 3 (
-  echo [ERROR] adb start-server timeout after retries.
-  exit /b 1
-)
-
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$adb='%ADB_EXE%';" ^
-  "$o=Join-Path $env:TEMP ('adb_o_'+(Get-Random)+'.txt');" ^
-  "$e=Join-Path $env:TEMP ('adb_e_'+(Get-Random)+'.txt');" ^
-  "try{ Start-Process -FilePath $adb -ArgumentList @('kill-server') -NoNewWindow -PassThru -RedirectStandardOutput $o -RedirectStandardError $e | Out-Null }catch{}" ^
-  "Start-Sleep -Milliseconds 300;" ^
-  "$p = Start-Process -FilePath $adb -ArgumentList @('start-server') -NoNewWindow -PassThru -RedirectStandardOutput $o -RedirectStandardError $e;" ^
-  "if($p.WaitForExit(60000)){ exit $p.ExitCode } else { try{$p.Kill()}catch{}; exit 124 }" >nul 2>&1
-
-if errorlevel 124 (
-  echo [WARN] adb start-server timeout (60s), retry=%TRY%
-  taskkill /F /IM adb.exe >nul 2>&1
-  timeout /t 1 /nobreak >nul
-  goto :adb_retry
-)
-
 exit /b 0
