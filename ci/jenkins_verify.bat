@@ -2,10 +2,12 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 rem ============================================================
-rem Jenkins verify runner (FINAL STABLE)
-rem - No PowerShell device check (encryption-safe)
-rem - Only uses: adb get-state (ASCII)
-rem - Starts appium, runs robot with robot_args.txt
+rem Jenkins verify runner (FINAL STABLE VERSION)
+rem - Encryption-safe: DO NOT parse "adb devices" table
+rem - DO NOT use PowerShell redirection to nul (can break on encrypted env)
+rem - Start/Stop Appium safely
+rem - Robot returns real exit code (NO --nostatusrc)
+rem - Output to %WORKSPACE%\results
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -23,7 +25,7 @@ rem ---- Project root (autotest) ----
 set "ROOT=%~dp0.."
 set "BAT=%~f0"
 
-rem ---- WORKSPACE results dir ----
+rem ---- WORKSPACE results dir (preferred) ----
 if not "%WORKSPACE%"=="" (
   set "OUTDIR=%WORKSPACE%\results"
 ) else (
@@ -49,88 +51,133 @@ echo [INFO] ADB_EXE=%ADB_EXE%
 echo [INFO] DEVICE_ID=%DEVICE_ID%
 echo [INFO] APPIUM_PORT=%APPIUM_PORT%
 
-pushd "%ROOT%" || (echo [ERROR] Cannot cd to project root.& exit /b 1)
+pushd "%ROOT%" || (echo [ERROR] Cannot cd to project root. & exit /b 1)
 
 if not exist "%OUTDIR%" mkdir "%OUTDIR%"
 
+rem ---- Python check ----
 echo [INFO] ===== PYTHON CHECK =====
 "%PY_EXE%" -V || (popd & exit /b 1)
 
+rem ---- Python deps check ----
+echo [INFO] ===== PYTHON DEPS CHECK =====
+call :check_pip_pkg robotframework || (set "ROBOT_RC=10" & goto :finally)
+call :check_pip_pkg robotframework-appiumlibrary || (set "ROBOT_RC=10" & goto :finally)
+call :check_pip_pkg pyyaml || (set "ROBOT_RC=10" & goto :finally)
+
+rem ---- Env check ----
 echo [INFO] ===== ENV CHECK =====
-where node >nul 2>&1 || (echo [ERROR] node not found.& set "ROBOT_RC=2" & goto :finally)
+where node >nul 2>&1 || (echo [ERROR] node not found in PATH. & set "ROBOT_RC=2" & goto :finally)
 node -v
+where npm >nul 2>&1 || (echo [ERROR] npm not found in PATH. & set "ROBOT_RC=2" & goto :finally)
+call npm -v >nul 2>&1 || (echo [ERROR] npm failed to run. & set "ROBOT_RC=2" & goto :finally)
 
-where npm >nul 2>&1 || (echo [ERROR] npm not found.& set "ROBOT_RC=2" & goto :finally)
-call npm -v >nul 2>&1 || (echo [ERROR] npm failed.& set "ROBOT_RC=2" & goto :finally)
-
+rem ---- Locate appium.cmd ----
 set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
 if not exist "%APPIUM_CMD%" (
   for /f "delims=" %%p in ('where appium 2^>nul') do set "APPIUM_CMD=%%p"
 )
 if not exist "%APPIUM_CMD%" (
   echo [ERROR] appium command not found.
+  echo [HINT] Run: npm i -g appium
   set "ROBOT_RC=2"
   goto :finally
 )
 
-echo [INFO] ===== CHECK DEVICE (ASCII get-state only) =====
+rem ---- Device check (encryption-safe) ----
+echo [INFO] ===== CHECK DEVICE (encryption-safe) =====
 if not exist "%ADB_EXE%" (
   echo [ERROR] adb.exe not found: %ADB_EXE%
   set "ROBOT_RC=3"
   goto :finally
 )
 
-"%ADB_EXE%" kill-server 1>nul 2>nul
-"%ADB_EXE%" start-server 1>nul 2>nul
+rem start adb (swallow output using cmd.exe)
+cmd /c ""%ADB_EXE%" kill-server 1>nul 2>nul"
+cmd /c ""%ADB_EXE%" start-server 1>nul 2>nul"
+timeout /t 1 >nul
 
-rem wait up to 30s for device state
+rem wait-for-device (avoid parsing text)
+"%ADB_EXE%" -s "%DEVICE_ID%" wait-for-device
+
+rem get-state -> file -> read one line
+"%ADB_EXE%" -s "%DEVICE_ID%" get-state > "%TEMP%\adb_state_%DEVICE_ID%.txt"
 set "STATE="
-for /l %%i in (1,1,30) do (
-  for /f "delims=" %%S in ('"%ADB_EXE%" -s %DEVICE_ID% get-state 2^>nul') do set "STATE=%%S"
-  if /i "!STATE!"=="device" goto :device_ok
-  ping 127.0.0.1 -n 2 >nul
+set /p STATE=<"%TEMP%\adb_state_%DEVICE_ID%.txt"
+if /i not "%STATE%"=="device" (
+  echo [ERROR] Device %DEVICE_ID% not ready, state=%STATE%
+  set "ROBOT_RC=3"
+  goto :finally
 )
-echo [ERROR] Device not ready after 30s. get-state="!STATE!"
-set "ROBOT_RC=3"
-goto :finally
+echo [OK] Device "%DEVICE_ID%" is online (device).
 
-:device_ok
-echo [OK] Device is ready: %DEVICE_ID%
-
+rem ---- Appium start ----
 echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
 call :kill_port %APPIUM_PORT%
 
 echo [INFO] ===== START APPIUM =====
 set "APPIUM_LOG=%OUTDIR%\appium.log"
-start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
-timeout /t 3 /nobreak >nul
+echo [INFO] APPIUM_CMD=%APPIUM_CMD%
+echo [INFO] APPIUM_LOG=%APPIUM_LOG%
 
+start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
+timeout /t 2 /nobreak >nul
+
+echo [INFO] ===== WAIT APPIUM READY =====
 call :wait_port %APPIUM_PORT% 90
 if errorlevel 1 (
-  echo [ERROR] Appium not ready on port %APPIUM_PORT%
+  echo [ERROR] Appium not ready on port %APPIUM_PORT% within timeout.
+  echo [HINT] Check log: %APPIUM_LOG%
   set "ROBOT_RC=4"
   goto :finally
 )
-echo [OK] Appium is ready.
+echo [OK] Appium is ready on %APPIUM_PORT%.
 
+rem ---- Run Robot ----
 echo [INFO] ===== RUN ROBOT =====
 set "ARGFILE=%OUTDIR%\robot_args.txt"
-if not exist "%ARGFILE%" (
-  echo [ERROR] robot_args.txt not found: %ARGFILE%
-  set "ROBOT_RC=5"
-  goto :finally
+
+if exist "%ARGFILE%" (
+  echo [INFO] Using argument file: %ARGFILE%
+  "%PY_EXE%" -m robot -A "%ARGFILE%"
+) else (
+  if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
+  if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
+  echo [INFO] Fallback: run suite=%SUITE% on %TEST_ROOT%
+  "%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
 )
 
-"%PY_EXE%" -m robot -A "%ARGFILE%"
 set "ROBOT_RC=%ERRORLEVEL%"
 
 :finally
 echo [INFO] ===== STOP APPIUM =====
-call :kill_port %APPIUM_PORT%
+call :stop_appium %APPIUM_PORT%
+
+echo [INFO] ===== RESULT FILES IN OUTDIR =====
+if exist "%OUTDIR%\output.xml" (
+  echo [OK] output.xml exists: %OUTDIR%\output.xml
+) else (
+  echo [WARN] output.xml missing in: %OUTDIR%
+)
+dir /a /-c "%OUTDIR%"
 
 echo [INFO] ===== END jenkins_verify.bat ROBOT_RC=%ROBOT_RC% =====
 popd
 exit /b %ROBOT_RC%
+
+rem ============================================================
+rem Subroutines
+rem ============================================================
+
+:check_pip_pkg
+set "PKG=%~1"
+"%PY_EXE%" -m pip show "%PKG%" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Python package not installed: %PKG%
+  echo [HINT] Run: "%PY_EXE%" -m pip install -U %PKG%
+  exit /b 1
+)
+exit /b 0
 
 :kill_port
 set "PORT=%~1"
@@ -148,3 +195,13 @@ for /l %%i in (1,1,%SECONDS%) do (
   timeout /t 1 /nobreak >nul
 )
 exit /b 1
+
+:stop_appium
+set "PORT=%~1"
+call :kill_port %PORT%
+
+rem Kill only node.exe processes that are running appium
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ps = Get-CimInstance Win32_Process -Filter ""Name='node.exe'"" | Where-Object { $_.CommandLine -match 'appium' };" ^
+  "foreach($p in $ps){ try{ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }catch{} }" >nul 2>&1
+exit /b 0
