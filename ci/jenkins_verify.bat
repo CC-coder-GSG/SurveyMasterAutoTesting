@@ -7,8 +7,8 @@ rem - Force Python 3.14
 rem - CALL every .cmd/.bat invocation (npm/appium)
 rem - Output reports to %WORKSPACE%\results
 rem - Return non-zero on failures (Jenkinsfile catchError => UNSTABLE)
-rem - Robust device state check (handles TAB/spaces)
-rem - Robust Appium stop (kill appium/node, not just port)
+rem - ENCRYPTION-SAFE device check: DO NOT parse adb text output
+rem - Robust Appium stop: kill port + kill node.exe whose cmdline contains appium
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -30,7 +30,6 @@ rem ---- WORKSPACE results dir (preferred) ----
 if not "%WORKSPACE%"=="" (
   set "OUTDIR=%WORKSPACE%\results"
 ) else (
-  rem Fallback: parent of ROOT
   set "OUTDIR=%ROOT%\..\results"
 )
 
@@ -40,6 +39,7 @@ set "ADB_EXE=%ANDROID_HOME%\platform-tools\adb.exe"
 
 rem ---- Defaults ----
 if "%APPIUM_PORT%"=="" set "APPIUM_PORT=4723"
+if "%DEVICE_ID%"=="" set "DEVICE_ID=4e83cae7"
 set "ROBOT_RC=0"
 
 echo [INFO] ===== START jenkins_verify.bat =====
@@ -49,6 +49,7 @@ echo [INFO] WORKSPACE=%WORKSPACE%
 echo [INFO] OUTDIR=%OUTDIR%
 echo [INFO] ANDROID_HOME=%ANDROID_HOME%
 echo [INFO] ADB_EXE=%ADB_EXE%
+echo [INFO] DEVICE_ID=%DEVICE_ID%
 echo [INFO] APPIUM_PORT=%APPIUM_PORT%
 
 pushd "%ROOT%" || (
@@ -98,13 +99,8 @@ call "%APPIUM_CMD%" -v || (
   goto :finally
 )
 
-rem ---- Device check ----
-echo [INFO] ===== CHECK DEVICE =====
-if "%DEVICE_ID%"=="" (
-  echo [WARN] DEVICE_ID is empty, using fallback 4e83cae7
-  set "DEVICE_ID=4e83cae7"
-)
-
+rem ---- Device check (ENCRYPTION-SAFE: no parsing adb text output) ----
+echo [INFO] ===== CHECK DEVICE (encryption-safe) =====
 if not exist "%ADB_EXE%" (
   echo [ERROR] adb.exe not found at: %ADB_EXE%
   echo [HINT] Set ANDROID_HOME in Jenkins or ensure D:\android-sdk exists.
@@ -114,28 +110,42 @@ if not exist "%ADB_EXE%" (
 
 "%ADB_EXE%" start-server >nul 2>&1
 
-rem ✅ Robust parse: handles TAB/spaces in adb output
-set "OK_DEVICE="
-for /f "tokens=1,2" %%a in ('"%ADB_EXE%" devices ^| findstr /i "%DEVICE_ID%"') do (
-  if /i "%%a"=="%DEVICE_ID%" if /i "%%b"=="device" set "OK_DEVICE=1"
-)
-if not defined OK_DEVICE (
-  echo [ERROR] DEVICE_ID not in device state: %DEVICE_ID%
-  echo [HINT] Run: "%ADB_EXE%" devices
+rem 1) wait-for-device with timeout (20s)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$adb='%ADB_EXE%'; $id='%DEVICE_ID%';" ^
+  "$p = Start-Process -FilePath $adb -ArgumentList @('-s',$id,'wait-for-device') -NoNewWindow -PassThru;" ^
+  "if($p.WaitForExit(20)){ exit $p.ExitCode } else { try{$p.Kill()}catch{}; exit 124 }" >nul 2>&1
+
+if errorlevel 124 (
+  echo [ERROR] adb wait-for-device timeout (20s): %DEVICE_ID%
   set "ROBOT_RC=3"
   goto :finally
 )
 
-rem 双保险：get-state（加 timeout，防止偶发 adb 卡住）
-set "STATE="
-for /f "delims=" %%s in ('powershell -NoProfile -Command "$p=Start-Process -FilePath ''%ADB_EXE%'' -ArgumentList ''-s %DEVICE_ID% get-state'' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $env:TEMP ''adb_state.txt''); if($p.WaitForExit(15)){ Get-Content (Join-Path $env:TEMP ''adb_state.txt'') } else { $p.Kill(); exit 124 }" 2^>nul') do set "STATE=%%s"
-if "%STATE%"=="124" (
-  echo [ERROR] adb get-state timeout.
+rem 2) get-state check inside PowerShell, only uses exitcode (no stdout parse in bat)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$adb='%ADB_EXE%'; $id='%DEVICE_ID%';" ^
+  "$p = Start-Process -FilePath $adb -ArgumentList @('-s',$id,'get-state') -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $env:TEMP ('adb_state_'+$id+'.txt'));" ^
+  "if(-not $p.WaitForExit(10)){ try{$p.Kill()}catch{}; exit 124 }" ^
+  "$s = (Get-Content (Join-Path $env:TEMP ('adb_state_'+$id+'.txt')) -ErrorAction SilentlyContinue | Select-Object -First 1).Trim();" ^
+  "if($s -ieq 'device'){ exit 0 } else { exit 3 }" >nul 2>&1
+
+if errorlevel 124 (
+  echo [ERROR] adb get-state timeout (10s): %DEVICE_ID%
   set "ROBOT_RC=3"
   goto :finally
 )
-if /i not "%STATE%"=="device" (
-  echo [ERROR] get-state is "%STATE%", not ready.
+if errorlevel 3 (
+  echo [ERROR] device not in 'device' state (offline/unauthorized/not found): %DEVICE_ID%
+  echo [HINT] Check phone authorization prompt / replug USB / restart adb.
+  set "ROBOT_RC=3"
+  goto :finally
+)
+
+rem 3) sanity: adb shell (exitcode only)
+"%ADB_EXE%" -s %DEVICE_ID% shell "echo ok" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] adb shell not available for %DEVICE_ID% (unauthorized/offline?)
   set "ROBOT_RC=3"
   goto :finally
 )
@@ -151,7 +161,6 @@ set "APPIUM_LOG=%OUTDIR%\appium.log"
 echo [INFO] APPIUM_CMD=%APPIUM_CMD%
 echo [INFO] APPIUM_LOG=%APPIUM_LOG%
 
-rem IMPORTANT: start + cmd /c + CALL appium.cmd
 start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
 timeout /t 2 /nobreak >nul
 
@@ -195,7 +204,6 @@ dir /a /-c "%OUTDIR%"
 echo [INFO] ===== END jenkins_verify.bat ROBOT_RC=%ROBOT_RC% =====
 popd
 
-rem ✅ Return real exit code (Jenkinsfile catchError => UNSTABLE)
 exit /b %ROBOT_RC%
 
 rem ============================================================
@@ -215,7 +223,6 @@ exit /b 0
 :kill_port
 set "PORT=%~1"
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:":%PORT% " 2^>nul') do (
-  echo [INFO] Kill PID %%p on port %PORT%
   taskkill /F /PID %%p >nul 2>&1
 )
 exit /b 0
@@ -224,7 +231,7 @@ exit /b 0
 set "PORT=%~1"
 set "SECONDS=%~2"
 for /l %%i in (1,1,%SECONDS%) do (
-  powershell -NoProfile -Command "try{ $c = New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try{ $c = New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
   if not errorlevel 1 exit /b 0
   timeout /t 1 /nobreak >nul
 )
@@ -232,17 +239,11 @@ exit /b 1
 
 :stop_appium
 set "PORT=%~1"
-rem 1) 先杀端口（能杀掉监听进程）
 call :kill_port %PORT%
 
-rem 2) 再补刀：杀 appium/node（避免残留导致下次启动异常）
-for /f "tokens=2 delims=," %%p in ('tasklist /FI "IMAGENAME eq node.exe" /FO CSV ^| findstr /i "node.exe"') do (
-  rem %%p like "1234"
-  set "PID=%%~p"
-  if not "!PID!"=="" (
-    echo [INFO] Kill node.exe PID !PID!
-    taskkill /F /PID !PID! >nul 2>&1
-  )
-)
+rem Kill only node.exe processes that are running appium (safer than killing all node.exe)
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ps = Get-CimInstance Win32_Process -Filter ""Name='node.exe'"" | Where-Object { $_.CommandLine -match 'appium' };" ^
+  "foreach($p in $ps){ try{ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }catch{} }" >nul 2>&1
 
 exit /b 0
