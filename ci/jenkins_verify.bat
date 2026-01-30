@@ -6,7 +6,7 @@ rem Jenkins verify runner (WORKSPACE results + CALL-safe)
 rem - Force Python 3.14
 rem - CALL every .cmd/.bat invocation (npm/appium)
 rem - Output reports to %WORKSPACE%\results (single source of truth)
-rem - Print debug paths and list result files
+rem - Return non-zero on failures (let Jenkinsfile mark UNSTABLE)
 rem ============================================================
 
 rem ---- Force Python 3.14 ----
@@ -33,7 +33,6 @@ if not "%WORKSPACE%"=="" (
 )
 
 rem ---- ADB: prefer ANDROID_HOME, else default ----
-set "ANDROID_HOME=%ANDROID_HOME%"
 if "%ANDROID_HOME%"=="" set "ANDROID_HOME=D:\android-sdk"
 set "ADB_EXE=%ANDROID_HOME%\platform-tools\adb.exe"
 
@@ -61,9 +60,9 @@ echo [INFO] PY_EXE="%PY_EXE%"
 
 rem ---- Python deps check ----
 echo [INFO] ===== PYTHON DEPS CHECK =====
-call :check_pip_pkg robotframework
-call :check_pip_pkg robotframework-appiumlibrary
-call :check_pip_pkg pyyaml
+call :check_pip_pkg robotframework || (popd & exit /b 10)
+call :check_pip_pkg robotframework-appiumlibrary || (popd & exit /b 10)
+call :check_pip_pkg pyyaml || (popd & exit /b 10)
 
 rem ---- Env check ----
 echo [INFO] ===== ENV CHECK =====
@@ -71,7 +70,6 @@ where node || (echo [ERROR] node not found in PATH. & popd & exit /b 2)
 node -v
 
 where npm || (echo [ERROR] npm not found in PATH. & popd & exit /b 2)
-rem IMPORTANT: npm is npm.cmd, must CALL
 call npm -v || (echo [ERROR] npm failed to run. & popd & exit /b 2)
 
 rem ---- Locate appium.cmd ----
@@ -87,7 +85,6 @@ if not exist "%APPIUM_CMD%" (
   exit /b 2
 )
 
-rem IMPORTANT: appium.cmd must be invoked with CALL
 call "%APPIUM_CMD%" -v || (
   echo [ERROR] Appium CLI failed. Check node/npm/appium installation.
   popd
@@ -109,14 +106,16 @@ if not exist "%ADB_EXE%" (
 )
 
 "%ADB_EXE%" start-server >nul 2>&1
-"%ADB_EXE%" devices | findstr /i "%DEVICE_ID%" >nul 2>&1
+
+rem 更严格：必须是 device 状态（避免 offline/unauthorized 误判）
+"%ADB_EXE%" devices | findstr /r /i "^%DEVICE_ID%[ ]\+device$" >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] DEVICE_ID not online: %DEVICE_ID%
+  echo [ERROR] DEVICE_ID not in device state: %DEVICE_ID%
   echo [HINT] Run: "%ADB_EXE%" devices
   popd
   exit /b 3
 )
-echo [OK] Device "%DEVICE_ID%" is online.
+echo [OK] Device "%DEVICE_ID%" is online (device).
 
 rem ---- Appium port ----
 if "%APPIUM_PORT%"=="" set "APPIUM_PORT=4723"
@@ -129,7 +128,6 @@ set "APPIUM_LOG=%OUTDIR%\appium.log"
 echo [INFO] APPIUM_CMD=%APPIUM_CMD%
 echo [INFO] APPIUM_LOG=%APPIUM_LOG%
 
-rem IMPORTANT: start + cmd /c + CALL appium.cmd
 start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
 timeout /t 2 /nobreak >nul
 
@@ -140,17 +138,22 @@ if errorlevel 1 (
   echo [HINT] Check log: %APPIUM_LOG%
   call :kill_port %APPIUM_PORT%
   popd
-  rem keep Jenkins success? still exit 0? you can change to exit /b 4 if you want hard fail
-  exit /b 0
+  exit /b 4
 )
 echo [OK] Appium is ready on %APPIUM_PORT%.
 
 echo [INFO] ===== RUN ROBOT =====
-if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
-if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
+set "ARGFILE=%OUTDIR%\robot_args.txt"
 
-echo [INFO] CMD=%PY_EXE% -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
-"%PY_EXE%" -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
+if exist "%ARGFILE%" (
+  echo [INFO] Using argument file: %ARGFILE%
+  "%PY_EXE%" -m robot -A "%ARGFILE%"
+) else (
+  if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
+  if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
+  echo [INFO] CMD=%PY_EXE% -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
+  "%PY_EXE%" -m robot --nostatusrc --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
+)
 set "ROBOT_RC=%ERRORLEVEL%"
 
 echo [INFO] ===== STOP APPIUM =====
@@ -167,8 +170,8 @@ dir /a /-c "%OUTDIR%"
 echo [INFO] ===== END jenkins_verify.bat ROBOT_RC=%ROBOT_RC% =====
 popd
 
-rem Keep Jenkins SUCCESS always
-exit /b 0
+rem ✅ 返回真实退出码，让 Jenkinsfile 把它标黄
+exit /b %ROBOT_RC%
 
 rem ============================================================
 rem Subroutines
