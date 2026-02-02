@@ -1,9 +1,12 @@
 *** Settings ***
 Library    AppiumLibrary
+Library    OperatingSystem
 Variables  ../../variables/env_test.yaml
 
 *** Keywords ***
 Open SurveyMaster App
+    [Documentation]    启动 APP，并在启动前强制赋予“管理所有文件”权限
+    Run    adb -s ${UDID} shell appops set ${APP_PACKAGE} MANAGE_EXTERNAL_STORAGE allow
     Open Application
     ...    ${APPIUM_SERVER}
     ...    platformName=${PLATFORM_NAME}
