@@ -139,6 +139,11 @@ set "ARGFILE=%OUTDIR%\robot_args.txt"
 
 if exist "%ARGFILE%" (
   echo [INFO] Using argument file: %ARGFILE%
+
+  echo [INFO] ===== ARGFILE CONTENT BEGIN =====
+  type "%ARGFILE%"
+  echo [INFO] ===== ARGFILE CONTENT END =====
+  
   "%PY_EXE%" -m robot -A "%ARGFILE%"
 ) else (
   if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
