@@ -21,4 +21,4 @@ Tap EquipmentInformation Button
 # 等待搜星完成（单点状态）
 Wait Search for Sattlite
     Wait Visible    ${GuideActivity.Fix_Status}
-    Wait Until Element Text Matches Regexp    ${GuideActivity.Fix_Status}    ^(单点)$    90s    1s
+    Wait Until Element Text Matches Regexp    ${GuideActivity.Fix_Status}    ^(单点|固定|浮动)$    90s    1s

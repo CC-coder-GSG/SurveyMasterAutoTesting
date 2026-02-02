@@ -24,3 +24,34 @@ Open SurveyMaster App
 
 Close SurveyMaster App
     Close Application
+
+Handle All Files Access Permission If Needed
+    [Documentation]    所有文件访问权限 / 授予所有文件的管理权限
+    ${onPage}=    Run Keyword And Return Status
+    ...    Wait Until Page Contains Element
+    ...    android=new UiSelector().textContains("所有文件")
+    ...    2s
+
+    IF    ${onPage}
+        Log    [PERM] On MANAGE_EXTERNAL_STORAGE page
+        # ② 优先点 Switch（通用）
+        ${hasSwitch}=    Run Keyword And Return Status
+        ...    Page Should Contain Element
+        ...    android=new UiSelector().className("android.widget.Switch")
+
+        IF    ${hasSwitch}
+            Click Element    android=new UiSelector().className("android.widget.Switch")
+        ELSE
+            # ③ 有些 ROM switch 不是 Switch 类，兜底用“可点击”的控件
+            #    尽量点右侧那个（通常是第一个可点击开关控件）
+            Click Element    android=new UiSelector().clickable(true).classNameMatches(".*(Switch|CheckBox|Button).*")
+        END
+
+        Sleep    1s
+        Press Keycode    4
+        Sleep    1s
+    END
+
+Open App And Handle Permissions
+    Open SurveyMaster App
+    Handle All Files Access Permission If Needed
