@@ -133,6 +133,13 @@ if errorlevel 1 (
 )
 echo [OK] Appium is ready on %APPIUM_PORT%.
 
+echo [DEBUG] ===== NETSTAT %APPIUM_PORT% =====
+netstat -ano | findstr ":%APPIUM_PORT%"
+
+echo [DEBUG] ===== STATUS CHECK =====
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "try{(Invoke-RestMethod -Uri 'http://127.0.0.1:%APPIUM_PORT%/status' -TimeoutSec 2) | ConvertTo-Json -Compress}catch{Write-Host 'STATUS_FAIL'}"
+
 rem ---- Run Robot ----
 echo [INFO] ===== RUN ROBOT =====
 set "ARGFILE=%OUTDIR%\robot_args.txt"
@@ -143,7 +150,7 @@ if exist "%ARGFILE%" (
   echo [INFO] ===== ARGFILE CONTENT BEGIN =====
   type "%ARGFILE%"
   echo [INFO] ===== ARGFILE CONTENT END =====
-  
+
   "%PY_EXE%" -m robot -A "%ARGFILE%"
 ) else (
   if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
