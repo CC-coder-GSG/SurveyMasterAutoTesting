@@ -43,6 +43,23 @@ Scroll To And Tap Text Contains
     ${loc}=    Android Scroll Into View By Text Contains    ${text}
     Tap    ${loc}
 
+Scroll Into View By Id
+# 滚动使用Id查找某个元素出现，并返回定位器
+    [Arguments]    ${id}
+    ${locator}=    Set Variable
+    ...    android=new UiScrollable(new UiSelector().scrollable(true)).scrollIntoView(new UiSelector().resourceId("${id}"))
+    RETURN    ${locator}
+
+Scroll And Get Text
+# 滚动使用Id查找某个元素出现，并获取其文本
+    [Arguments]    ${id}
+    ${loc}=    Scroll Into View By Id    ${id}
+    Log Source
+    Wait Until Element Is Visible    ${loc}    10s
+    ${text}=   Get Text    ${loc}
+    Should Not Be Empty    ${text}    元素 ${id} 的文本不能为空
+    RETURN     ${text}
+
 Click Clear Button For Input
 # 使用xpath定位并点击输入框的清除按钮 /清除按钮无Id
     [Arguments]    ${input_id}
