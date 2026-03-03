@@ -7,6 +7,9 @@
 ...    PROJECT_PAGE_BUTTON=android=new UiSelector().text("项目")
 # 底部设备页面定位
 ...    EQUIPMENT_PAGE_BUTTON=android=new UiSelector().text("设备")
+# 底部工具页面定位
+...    TOOLS_PAGES_BUTTON=android=new UiSelector().text("工具")
+# resourceId("com.sinognss.sm.free:id/fixed_bottom_navigation_container").instance(3)
 # 司南万象功能按钮
 ...    SinoWanXiang_BUTTON=android=new UiSelector().text("司南万象")
 # 固定状态显示
