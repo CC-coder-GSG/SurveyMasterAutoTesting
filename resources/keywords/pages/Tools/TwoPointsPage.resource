@@ -3,6 +3,10 @@ Resource    ../../../locators/android/TwoPoints.resource
 Resource    ../../common/actions.resource
 
 *** Keywords ***
+Tap Two Points Tool Button
+    [Documentation]    点击工具页面中的"两点计算"工具按钮，进入两点计算页面
+    Tap    ${TwoPoints.TWO_POINTS_TOOL_BUTTON}
+
 Input Point Name
     [Arguments]    ${NAME_BOX}    ${name}
     Click Element    ${NAME_BOX}
