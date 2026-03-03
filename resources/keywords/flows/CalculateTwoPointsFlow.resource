@@ -1,15 +1,15 @@
 *** Settings ***
-Resource    ../../TestData/Coordinates.resource
-Resource    ../pages/Tools/ToolsPage.resource
+Resource    ../../../tests/TestData/Coordinates.resource
+Resource    ../pages/GuideActivity.resource
 Resource    ../pages/Tools/TwoPointsPage.resource
-Resource    ../pages/Tools/Calc_twopoints.resource
-Resource    ../pages/Tools/TwoPointsAssert.resource
+Resource    ../../../tests/regression/TwoPoints/Calc_twopoints.resource
+Resource    ../../../tests/regression/TwoPoints/TwoPointsAssert.resource
 
 *** Keywords ***
 Prepare TwoPoints Case Flow
-    [Documentation]    获取两点测试数据（随机或文件）
-    ${case}=    Get Two Points Test Data
-    RETURN    ${case}
+    [Documentation]    获取两点测试数据（文件优先，失败则随机）
+    ${points}=    Get Two Points Test Data
+    RETURN    ${points}
 
 
 Calculate Two Points Flow
