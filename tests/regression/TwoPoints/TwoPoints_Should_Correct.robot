@@ -17,5 +17,5 @@ TwoPoints Should Correct
     TwoPoints Verify Result Flow
     ...    ${actual}
     ...    ${expected}
-    ...    ${case['tolerance']}
+    ...    ${tolerance}
     ...    ${testdata}
