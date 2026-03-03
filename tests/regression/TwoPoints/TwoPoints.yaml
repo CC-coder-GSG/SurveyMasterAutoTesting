@@ -1,0 +1,54 @@
+case_name: two_points_calculation
+
+fixed_points:
+  start:
+    name: S1
+    n: 1000
+    e: 1000
+    z: 10
+  end:
+    name: E1
+    n: 2000
+    e: 2000
+
+tolerance:
+  azimuth:
+    type: angle
+    tol: 0.01
+
+  horizontal:
+    type: float
+    tol: 0.001
+
+  slope_dist:
+    type: float
+    tol: 0.001
+
+  vertical:
+    type: float
+    tol: 0.001
+
+  dh:
+    type: float
+    tol: 0.001
+
+  slope_ratio:
+    type: ratio
+    tol: 0.001 
+
+  slope_percent:
+    type: percent
+    tol: 0.001
+
+  slope_angle:
+    type: angle
+    tol: 0.01
+
+  north_offset:
+    type: float
+    tol: 0.001
+
+  east_offset:
+    type: float
+    tol: 0.001
+
