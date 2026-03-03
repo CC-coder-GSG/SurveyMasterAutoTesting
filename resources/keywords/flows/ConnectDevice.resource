@@ -2,7 +2,7 @@
 Resource    ../../locators/android/Popups.resource
 Resource    ../../locators/android/ConnectDevice.resource
 Resource    ../pages/GuideActivity.resource
-Resource    ../../keywords/pages/Equipment/ConnectDevice.resource
+Resource    ../pages/Equipment/ConnectDevice.resource
 
 *** Keywords ***
 Wait Connect Device Popup Disappear
