@@ -1,6 +1,8 @@
 *** Variables ***
 # 两点测量页面定位资源
 &{TwoPoints}
+# 两点计算工具按钮
+...    TWO_POINTS_TOOL_BUTTON=android=new UiSelector().className("android.view.ViewGroup").instance(8)
 # 起点
 ...    START_POINT_NAME_INPUT_BOX= android=new UiSelector().resourceId("com.sinognss.sm.free:id/ll_name")\.childSelector(new UiSelector().text("起点"))\.fromParent(new UiSelector().resourceId("com.sinognss.sm.free:id/et_point_name"))
 ...    START_N_INPUT_BOX= android=new UiSelector().resourceId("com.sinognss.sm.free:id/cov_start_point")\.childSelector(new UiSelector().resourceId("com.sinognss.sm.free:id/ll_start_point")\.childSelector(new UiSelector().className("android.widget.LinearLayout")\.childSelector(new UiSelector().resourceId("com.sinognss.sm.free:id/et_x"))))
