@@ -14,6 +14,6 @@ Connect A Device
     Equipment_Bottom Button Click
     DeviceConnect Button Click
     Tap Target Device
-    Wait Search And Connect Bluetooth Device    T61S00162
+    Wait Search And Connect Bluetooth Device    T61S00167
 
 
