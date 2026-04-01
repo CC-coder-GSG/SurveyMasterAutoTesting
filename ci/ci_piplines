@@ -20,7 +20,7 @@ pipeline {
         APK_DIR = "apk_in"
         ANDROID_HOME_DEFAULT = "D:\\android-sdk"
         TEST_REPO_URL = "https://github.com/CC-coder-GSG/SurveyMasterAutoTesting.git"
-        TEST_BRANCH   = "main"
+        DEFAULT_TEST_BRANCH = "main"
         TEST_DIR      = "autotest"
         SERVER_ANDROID_VERSION = "11"
         WECHAT_WEBHOOK = credentials('wecom_robot_webhook')
@@ -120,7 +120,7 @@ pipeline {
                 dir("${env.TEST_DIR}") {
                     deleteDir()
                     script {
-                        def branch = (params.TEST_BRANCH?.trim()) ?: env.TEST_BRANCH
+                        def branch = (params.TEST_BRANCH?.trim()) ?: env.DEFAULT_TEST_BRANCH
                         echo "Checking out branch: ${branch}"
                         retry(3) {
                             git branch: branch, url: "${env.TEST_REPO_URL}"
