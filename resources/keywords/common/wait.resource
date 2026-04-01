@@ -1,9 +1,11 @@
 *** Settings ***
-Library    AppiumLibrary
+Library     AppiumLibrary
+
 
 *** Variables ***
-${DEFAULT_TIMEOUT}    10s
-${POLL_INTERVAL}      300ms
+${DEFAULT_TIMEOUT}      10s
+${POLL_INTERVAL}        300ms
+
 
 *** Keywords ***
 Wait Visible
@@ -19,6 +21,7 @@ Wait Page Stable
     Sleep    ${seconds}
 
 # 等待所属控件的文本与期待值对应一致
+
 Wait Until Element Text Equals
     [Arguments]    ${locator}    ${expected}    ${timeout}=10s    ${interval}=500ms
     Wait Until Keyword Succeeds    ${timeout}    ${interval}
@@ -30,6 +33,7 @@ Element Text Should Be
     Should Be Equal As Strings    ${text}    ${expected}
 
 # 等待所属控件的文本与期待值对应一致（正则表达式）
+
 Wait Until Element Text Matches Regexp
     [Arguments]    ${locator}    ${pattern}    ${timeout}=10s    ${interval}=500ms
     Wait Until Keyword Succeeds    ${timeout}    ${interval}

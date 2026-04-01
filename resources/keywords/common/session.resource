@@ -1,7 +1,8 @@
 *** Settings ***
-Library    AppiumLibrary
-Library    OperatingSystem
-Variables  ../../variables/env_test.yaml
+Library         AppiumLibrary
+Library         OperatingSystem
+Variables       ../../variables/env_test.yaml
+
 
 *** Keywords ***
 Open SurveyMaster App

@@ -2,6 +2,7 @@
 Resource    ../pages/GuideActivity.resource
 Resource    ../pages/Project/Project.resource
 
+
 *** Keywords ***
 # 创建一个新项目并删除
 Create A New Project
@@ -14,4 +15,3 @@ Create A New Project
     Scroll To And Tap Text Contains    text=AutoTestingProject
     Tap Delete Project Button
     Tap Confirm Popup Confirm Button
-

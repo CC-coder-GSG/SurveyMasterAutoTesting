@@ -1,11 +1,13 @@
 *** Settings ***
-Library    AppiumLibrary
+Library     AppiumLibrary
+
 
 *** Variables ***
-${REMOTE_URL}    http://127.0.0.1:4723
-${UDID}          4e83cae7
-${APP_PKG}       com.sinognss.sm.free
-${APP_ACT}       com.sinognss.sm.guide.ui.GuideActivity
+${REMOTE_URL}       http://127.0.0.1:4723
+${UDID}             4e83cae7
+${APP_PKG}          com.sinognss.sm.free
+${APP_ACT}          com.sinognss.sm.guide.ui.GuideActivity
+
 
 *** Test Cases ***
 Sanity - Open App

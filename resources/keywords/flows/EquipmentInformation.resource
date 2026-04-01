@@ -1,8 +1,10 @@
+*** Comments ***
 # 设备信息界面相关操作流程
+
+
 *** Settings ***
 Resource    ../../keywords/pages/Equipment/EquipmentInformation.resource
 Resource    ../../keywords/pages/GuideActivity.resource
-
 
 
 *** Keywords ***
@@ -12,4 +14,4 @@ Deep Restart
     EquipmentInformation Button Click
     Scroll To Restart and Tap
     Tap Deep Restart Button
-    Equipment_Bottom Button Click
+    Equipment Bottom Button Click

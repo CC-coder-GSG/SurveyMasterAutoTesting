@@ -1,5 +1,6 @@
 *** Settings ***
-Library    AppiumLibrary
+Library     AppiumLibrary
+
 
 *** Keywords ***
 Fail With Screenshot

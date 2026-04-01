@@ -10,7 +10,8 @@ Scroll To Restart and Tap
     Scroll To And Tap Text Contains    重启    ${EquipmentInformation.Swipe_Container}
 
 # 点击深度重启按钮、等待重启弹窗消失
+
 Tap Deep Restart Button
     Tap    ${EquipmentInformation.Deep_Restart}
     Tap    ${Popups.CONFRIM_POPUP_CONFRIM}
-    Wait Gone   ${Popups.Restart_POPUP}    60s
+    Wait Gone    ${Popups.Restart_POPUP}    60s

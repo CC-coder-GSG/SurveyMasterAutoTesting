@@ -11,14 +11,17 @@ Tap SinoWanXiang Button
     Tap    ${GuideActivity.SinoWanXiang_BUTTON}
 
 # 等待万象接入差分（判断逻辑为差分状态为浮动或者固定）
+
 Wait WanXiang Get Data
     Wait Until Element Text Matches Regexp    ${GuideActivity.Fix_Status}    ^(固定|浮动)$    15s    500ms
 
 # 点击设备信息按钮
+
 Tap EquipmentInformation Button
     EquipmentInformation Button Click
 
 # 等待搜星完成（单点状态）
+
 Wait Search for Sattlite
     Wait Visible    ${GuideActivity.Fix_Status}    30s
     Wait Until Element Text Matches Regexp    ${GuideActivity.Fix_Status}    ^(单点|固定|浮动)$    90s    500ms
