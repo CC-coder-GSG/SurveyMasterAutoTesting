@@ -6,8 +6,22 @@ Variables       ../../variables/env_test.yaml
 
 *** Keywords ***
 Open SurveyMaster App
-    [Documentation]    启动 APP，并在启动前强制赋予“管理所有文件”权限
+    [Documentation]    启动 APP，并在启动前通过 ADB 静默授予所有所需权限，避免系统权限弹窗
+    # Runtime 权限：等价于用户点击”允许”，完全静默
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.ACCESS_FINE_LOCATION
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.ACCESS_COARSE_LOCATION
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.BLUETOOTH_CONNECT
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.BLUETOOTH_SCAN
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.CAMERA
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.POST_NOTIFICATIONS
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.READ_PHONE_STATE
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.READ_MEDIA_IMAGES
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.READ_MEDIA_VIDEO
+    Run    adb -s ${UDID} shell pm grant ${APP_PACKAGE} android.permission.READ_MEDIA_AUDIO
+    # 特殊 AppOps 权限：无法通过 pm grant 授予，需要 appops
     Run    adb -s ${UDID} shell appops set ${APP_PACKAGE} MANAGE_EXTERNAL_STORAGE allow
+    Run    adb -s ${UDID} shell appops set ${APP_PACKAGE} SYSTEM_ALERT_WINDOW allow
+    Run    adb -s ${UDID} shell appops set ${APP_PACKAGE} WRITE_SETTINGS allow
     Open Application
     ...    ${APPIUM_SERVER}
     ...    platformName=${PLATFORM_NAME}
