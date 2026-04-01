@@ -37,6 +37,8 @@ Open SurveyMaster App
     ...    unicodeKeyboard=${UNICODE_KEYBOARD}
     ...    resetKeyboard=${RESET_KEYBOARD}
     ...    implicitWaitTimeout=${0}
+    ...    ignoreHiddenApiPolicyError=${IGNORE_HIDDEN_API_POLICY_ERROR}
+    ...    skipDeviceInitialization=${SKIP_DEVICE_INITIALIZATION}
 
 Close SurveyMaster App
     Close Application

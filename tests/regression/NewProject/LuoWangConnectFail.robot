@@ -16,6 +16,10 @@ LuoWang Connect Stability Test
     Handle Privacy Agreement
     # 连接蓝牙设备
     Connect A Device
+    Handle Bluetooth Pairing Dialog If Needed
+    Wait Connect Device Popup Disappear
+    Equipment Bottom Button Click
+    Wait Search for Sattlite
 
     # 1. 初始化失败计数器
     ${fail_count}=    Set Variable    0

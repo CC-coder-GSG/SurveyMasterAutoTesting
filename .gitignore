@@ -20,3 +20,7 @@ Thumbs.db
 
 # Local environment config (optional but recommended)
 resources/variables/env_test.yaml
+
+# Tool caches
+.playwright-mcp/
+.robocop_cache/

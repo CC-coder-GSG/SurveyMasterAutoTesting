@@ -149,6 +149,10 @@ NO_RESET: true
 AUTO_GRANT_PERMISSIONS: true
 NEW_COMMAND_TIMEOUT: 120
 APP_WAIT_ACTIVITY: "*"
+UNICODE_KEYBOARD: true
+RESET_KEYBOARD: true
+IGNORE_HIDDEN_API_POLICY_ERROR: true
+SKIP_DEVICE_INITIALIZATION: true
 """
                         writeFile file: 'resources/variables/env_test.yaml', text: yamlContent, encoding: 'UTF-8'
                         echo "Config generated for Device: ${deviceId}"
