@@ -120,9 +120,10 @@ pipeline {
                 dir("${env.TEST_DIR}") {
                     deleteDir()
                     script {
+                        def branch = (params.TEST_BRANCH?.trim()) ?: env.TEST_BRANCH
+                        echo "Checking out branch: ${branch}"
                         retry(3) {
-                            echo "Attempting to clone repository..."
-                            git branch: "${env.TEST_BRANCH}", url: "${env.TEST_REPO_URL}"
+                            git branch: branch, url: "${env.TEST_REPO_URL}"
                         }
                     }
                 }
