@@ -176,8 +176,7 @@ SKIP_DEVICE_INITIALIZATION: true
                 }
             }
         }
-    }
-    
+
         stage('Normalize Robot Results') {
             steps {
                 powershell """
@@ -208,7 +207,8 @@ SKIP_DEVICE_INITIALIZATION: true
                 """
             }
         }
-    
+    }
+
     post {
         always {
             archiveArtifacts artifacts: "results/**, ${env.TEST_DIR}/results/**, appium.log, ${env.TEST_DIR}/appium.log, logcat_*.txt, ${env.TEST_DIR}/logcat_*.txt",
