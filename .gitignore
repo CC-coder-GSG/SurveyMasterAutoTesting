@@ -1,6 +1,8 @@
 # Robot Framework outputs
 results/
 output/
+*.xml
+*.html
 
 # Python
 __pycache__/
