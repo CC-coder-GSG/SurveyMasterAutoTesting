@@ -21,6 +21,7 @@ Open SurveyMaster App
     ...    newCommandTimeout=${NEW_COMMAND_TIMEOUT}
     ...    unicodeKeyboard=${UNICODE_KEYBOARD}
     ...    resetKeyboard=${RESET_KEYBOARD}
+    ...    implicitWaitTimeout=${0}
 
 Close SurveyMaster App
     Close Application
