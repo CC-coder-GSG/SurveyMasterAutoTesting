@@ -36,10 +36,12 @@ pipeline {
         }
 
         stage('Copy selected APK') {
+            when {
+                expression { params.PACKAGE?.trim() }
+            }
             options { timeout(time: 5, unit: 'MINUTES') }
             steps {
                 script {
-                    if (!params.PACKAGE) { error "PACKAGE parameter is empty!" }
                     // 原来的逻辑：处理 Run Parameter 传递过来的字符串
                     def buildNo = params.PACKAGE.tokenize('|')[0].trim()
                     echo "Parsed BUILD_NO=${buildNo}"
@@ -70,9 +72,12 @@ pipeline {
                     }
                     Write-Host "Target Device ID: \$targetDevice"
 
-                    # 1. 找 APK
-                    \$apk = (Get-ChildItem -Path '${env.APK_DIR}' -Filter *.apk | Select-Object -First 1).FullName
-                    if (-not \$apk) { throw "No apk found in ${env.APK_DIR}" }
+                    # 1. 找 APK（先找 APK_DIR，若空则用本地路径）
+                    \$apk = (Get-ChildItem -Path '${env.APK_DIR}' -Filter *.apk -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+                    if (-not \$apk) {
+                        \$apk = (Get-ChildItem -Path 'E:\\SurveyMaster' -Filter *.apk -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+                    }
+                    if (-not \$apk) { throw "No apk found in ${env.APK_DIR} or E:\\SurveyMaster" }
                     
                     \$androidHome = \$env:ANDROID_HOME
                     if (-not \$androidHome) { \$androidHome = "${env.ANDROID_HOME_DEFAULT}" }
