@@ -18,6 +18,9 @@ LuoWang Connect Stability Test
     Connect A Device
     Handle Bluetooth Pairing Dialog If Needed
     Wait Connect Device Popup Disappear
+    # 连接完成后仍在「连接设备」子页面（无底部导航），先按 BACK 退回设备主页
+    Press Keycode    4
+    Sleep    1s
     Equipment Bottom Button Click
     Wait Search for Sattlite
 
