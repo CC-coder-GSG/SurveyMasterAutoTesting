@@ -73,3 +73,7 @@ Handle All Files Access Permission If Needed
 Open App And Handle Permissions
     Open SurveyMaster App
     Handle All Files Access Permission If Needed
+    # 强制从头重启确保落在「项目」主界面，避免 app 停留在测量/地图等其他界面
+    Terminate Application    ${APP_PACKAGE}
+    Activate Application     ${APP_PACKAGE}
+    Wait Until Page Contains Element    android=new UiSelector().text("项目")    30s
