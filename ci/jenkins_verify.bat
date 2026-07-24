@@ -1,5 +1,8 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
+chcp 65001 >nul
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 
 rem ============================================================
 rem Jenkins verify runner (FINAL STABLE VERSION)
@@ -95,7 +98,7 @@ if not exist "%ADB_EXE%" (
 rem start adb (swallow output using cmd.exe)
 cmd /c ""%ADB_EXE%" kill-server 1>nul 2>nul"
 cmd /c ""%ADB_EXE%" start-server 1>nul 2>nul"
-timeout /t 1 >nul
+powershell -NoProfile -Command "Start-Sleep -Seconds 1"
 
 rem wait-for-device (avoid parsing text)
 "%ADB_EXE%" -s "%DEVICE_ID%" wait-for-device
@@ -121,7 +124,7 @@ echo [INFO] APPIUM_CMD=%APPIUM_CMD%
 echo [INFO] APPIUM_LOG=%APPIUM_LOG%
 
 start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
-timeout /t 2 /nobreak >nul
+powershell -NoProfile -Command "Start-Sleep -Seconds 2"
 
 echo [INFO] ===== WAIT APPIUM READY =====
 call :wait_port %APPIUM_PORT% 90
@@ -144,21 +147,19 @@ rem ---- Run Robot ----
 echo [INFO] ===== RUN ROBOT =====
 set "ARGFILE=%OUTDIR%\robot_args.txt"
 
-if exist "%ARGFILE%" (
-  echo [INFO] Using argument file: %ARGFILE%
-
-  echo [INFO] ===== ARGFILE CONTENT BEGIN =====
-  type "%ARGFILE%"
-  echo [INFO] ===== ARGFILE CONTENT END =====
-
-  "%PY_EXE%" -m robot -A "%ARGFILE%"
-) else (
-  if "%SUITE%"=="" set "SUITE=LuoWangConnectFail"
-  if "%TEST_ROOT%"=="" set "TEST_ROOT=tests"
-  echo [INFO] Fallback: run suite=%SUITE% on %TEST_ROOT%
-  "%PY_EXE%" -m robot --outputdir "%OUTDIR%" --suite %SUITE% %TEST_ROOT%
+if not exist "%ARGFILE%" (
+  echo [ERROR] Robot argument file not found: %ARGFILE%
+  echo [HINT] The Jenkins pipeline must generate it from TEST_ROBOTS.
+  set "ROBOT_RC=5"
+  goto :finally
 )
 
+echo [INFO] Using argument file: %ARGFILE%
+echo [INFO] ===== ARGFILE CONTENT BEGIN =====
+type "%ARGFILE%"
+echo [INFO] ===== ARGFILE CONTENT END =====
+
+"%PY_EXE%" -m robot -A "%ARGFILE%"
 set "ROBOT_RC=%ERRORLEVEL%"
 
 :finally
@@ -204,7 +205,7 @@ set "SECONDS=%~2"
 for /l %%i in (1,1,%SECONDS%) do (
   powershell -NoProfile -ExecutionPolicy Bypass -Command "try{ $c = New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
   if not errorlevel 1 exit /b 0
-  timeout /t 1 /nobreak >nul
+  powershell -NoProfile -Command "Start-Sleep -Seconds 1"
 )
 exit /b 1
 

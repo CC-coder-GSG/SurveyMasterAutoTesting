@@ -1,13 +1,7 @@
 pipeline {
     agent any
 
-    // 【重要修改】删除了 parameters 代码块
-    // 这样 Jenkins 就会使用你在网页“配置”页面里设置的参数
-    // 请确保你在网页配置里已经有了：
-    // 1. PACKAGE (原来的那个动态下拉框)
-    // 2. DEVICE_ID (你需要手动在网页添加这个参数，类型选 String 或 Choice 都可以)
-    // 3. APK_PATH (如果原来有的话)
-
+    // 参数由 Jenkins 任务配置页维护，流水线只消费本次构建选择。
     options {
         timestamps()
         disableConcurrentBuilds()
@@ -15,23 +9,43 @@ pipeline {
     }
 
     environment {
-        PATH  = "C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;${env.PATH}"
-        APP_PKG = "com.sinognss.sm.free"
+        PATH = "C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0;${env.PATH}"
         APK_DIR = "apk_in"
         ANDROID_HOME_DEFAULT = "D:\\android-sdk"
-        TEST_REPO_URL = "https://github.com/CC-coder-GSG/SurveyMasterAutoTesting.git"
-        TEST_BRANCH   = "main"
-        TEST_DIR      = "autotest"
-        SERVER_ANDROID_VERSION = "11"
-        WECHAT_WEBHOOK = credentials('wecom_robot_webhook')
+        TEST_REPO_URL = "git@github.com:CC-coder-GSG/SurveyMasterAutoTesting.git"
+        DEFAULT_TEST_BRANCH = "main"
+        TEST_DIR = "autotest"
     }
 
     stages {
         stage('Show selection') {
             steps {
                 echo "JOB_NAME=${params.JOB_NAME}"
-                // 只要网页配置里有 DEVICE_ID，这里依然能读取到
-                echo "Current DEVICE_ID from Input=${params.DEVICE_ID}"
+                echo "PACKAGE=${params.PACKAGE}"
+                echo "APK_PATH=${params.APK_PATH}"
+                echo "TEST_ROBOTS=${params.TEST_ROBOTS}"
+                echo "TEST_BRANCH=${params.TEST_BRANCH}"
+                echo "DEVICE_ID=${params.DEVICE_ID}"
+            }
+        }
+
+        stage('Prepare workspace') {
+            steps {
+                powershell """
+                    \$ErrorActionPreference = 'Stop'
+                    \$resultsDir = Join-Path '${env.WORKSPACE}' 'results'
+                    \$apkDir = Join-Path '${env.WORKSPACE}' '${env.APK_DIR}'
+
+                    # 每次构建都清理旧参数和旧报告，避免误跑上一次选择的用例。
+                    if (Test-Path \$resultsDir) {
+                        Remove-Item -Recurse -Force \$resultsDir
+                    }
+                    New-Item -ItemType Directory -Path \$resultsDir | Out-Null
+
+                    if (Test-Path \$apkDir) {
+                        Remove-Item -Recurse -Force \$apkDir
+                    }
+                """
             }
         }
 
@@ -39,10 +53,21 @@ pipeline {
             options { timeout(time: 5, unit: 'MINUTES') }
             steps {
                 script {
-                    if (!params.PACKAGE) { error "PACKAGE parameter is empty!" }
-                    // 原来的逻辑：处理 Run Parameter 传递过来的字符串
+                    if (!params.JOB_NAME?.trim()) {
+                        error 'JOB_NAME parameter is empty'
+                    }
+                    if (!params.PACKAGE?.trim()) {
+                        error 'PACKAGE parameter is empty'
+                    }
+                    if (!params.APK_PATH?.trim()) {
+                        error 'APK_PATH parameter is empty'
+                    }
+
                     def buildNo = params.PACKAGE.tokenize('|')[0].trim()
-                    echo "Parsed BUILD_NO=${buildNo}"
+                    if (!(buildNo ==~ /\d+/)) {
+                        error "Cannot parse build number from PACKAGE=${params.PACKAGE}"
+                    }
+                    echo "Copying APK from ${params.JOB_NAME} #${buildNo}: ${params.APK_PATH}"
 
                     copyArtifacts(
                         projectName: params.JOB_NAME,
@@ -56,60 +81,52 @@ pipeline {
         }
 
         stage('Install APK') {
-            options { timeout(time: 10, unit: 'MINUTES') } 
+            options { timeout(time: 10, unit: 'MINUTES') }
             steps {
                 powershell """
-                    \$ErrorActionPreference = "Stop"
-                    
-                    # 获取 DEVICE_ID (来自网页配置)
-                    \$targetDevice = "${params.DEVICE_ID}"
+                    \$ErrorActionPreference = 'Stop'
+                    \$targetDevice = '${params.DEVICE_ID}'.Trim()
                     if ([string]::IsNullOrWhiteSpace(\$targetDevice)) {
-                        # 为了防止没填，给个默认提示或默认值
-                        # 如果网页里没填默认值，这里可能会报错
-                        throw "错误: DEVICE_ID 为空，请在 Jenkins 界面配置该参数"
+                        throw 'DEVICE_ID parameter is empty'
                     }
-                    Write-Host "Target Device ID: \$targetDevice"
 
-                    # 1. 找 APK
-                    \$apk = (Get-ChildItem -Path '${env.APK_DIR}' -Filter *.apk | Select-Object -First 1).FullName
-                    if (-not \$apk) { throw "No apk found in ${env.APK_DIR}" }
-                    
+                    \$apks = @(Get-ChildItem -Path '${env.APK_DIR}' -Filter *.apk -File)
+                    if (\$apks.Count -ne 1) {
+                        throw "Expected exactly one APK under ${env.APK_DIR}, found \$(\$apks.Count)"
+                    }
+                    \$apk = \$apks[0].FullName
+
                     \$androidHome = \$env:ANDROID_HOME
-                    if (-not \$androidHome) { \$androidHome = "${env.ANDROID_HOME_DEFAULT}" }
-                    \$adb = Join-Path \$androidHome "platform-tools\\adb.exe"
-                    
-                    Write-Host "Starting ADB..."
-                    & \$adb start-server | Out-Null
+                    if ([string]::IsNullOrWhiteSpace(\$androidHome)) {
+                        \$androidHome = '${env.ANDROID_HOME_DEFAULT}'
+                    }
+                    \$adb = Join-Path \$androidHome 'platform-tools\\adb.exe'
+                    if (!(Test-Path \$adb)) {
+                        throw "adb.exe not found: \$adb"
+                    }
 
-                    # 2. 检查设备
-                    Write-Host "Checking connectivity for: \$targetDevice"
-                    \$ok = \$false
-                    for (\$i=0; \$i -lt 10; \$i++) {
-                        \$out = (& \$adb devices)
-                        if (\$out -match "\$targetDevice\\s+device") { \$ok = \$true; break }
+                    Write-Host "Checking device: \$targetDevice"
+                    & \$adb start-server | Out-Null
+                    \$online = \$false
+                    for (\$attempt = 1; \$attempt -le 10; \$attempt++) {
+                        if ((& \$adb -s \$targetDevice get-state 2>\$null) -eq 'device') {
+                            \$online = \$true
+                            break
+                        }
                         Start-Sleep -Seconds 1
                     }
-                    if (-not \$ok) { throw "设备 \$targetDevice 未连接或离线" }
-
-                    # 3. 卸载
-                    Write-Host "Uninstalling ${env.APP_PKG} from \$targetDevice ..."
-                    & \$adb -s \$targetDevice uninstall ${env.APP_PKG} | Out-Host
-                    \$global:Error.Clear()
-
-                    # 4. 安装
-                    Write-Host "Installing APK to \$targetDevice ..."
-                    & \$adb -s \$targetDevice install -r -d "\$apk" | Out-Host
-                    
-                    if (\$LASTEXITCODE -eq 0) { 
-                        Write-Host "Install Success." 
-                    } else {
-                        throw "Install Failed with exit code \$LASTEXITCODE"
+                    if (!\$online) {
+                        throw "Device \$targetDevice is offline or unavailable"
                     }
 
-                    # 5. 杀进程防卡死
-                    Write-Host "Stopping ADB server..."
-                    & \$adb kill-server
-                    exit 0
+                    Write-Host "Uninstalling ${params.APP_PACKAGE} from \$targetDevice"
+                    & \$adb -s \$targetDevice uninstall '${params.APP_PACKAGE}' | Out-Host
+
+                    Write-Host "Installing \$apk"
+                    & \$adb -s \$targetDevice install -r -d \$apk | Out-Host
+                    if (\$LASTEXITCODE -ne 0) {
+                        throw "APK installation failed with exit code \$LASTEXITCODE"
+                    }
                 """
             }
         }
@@ -120,39 +137,99 @@ pipeline {
                 dir("${env.TEST_DIR}") {
                     deleteDir()
                     script {
+                        def branch = params.TEST_BRANCH?.trim() ?: env.DEFAULT_TEST_BRANCH
+                        echo "Checking out autotest branch: ${branch}"
                         retry(3) {
-                            echo "Attempting to clone repository..."
-                            git branch: "${env.TEST_BRANCH}", url: "${env.TEST_REPO_URL}"
+                            git branch: branch, url: env.TEST_REPO_URL
                         }
                     }
                 }
             }
         }
 
-        stage('Generate Local Config') {
+        stage('Generate local config') {
             steps {
                 dir("${env.TEST_DIR}") {
                     script {
-                        def deviceId = params.DEVICE_ID
-                        bat "if not exist resources\\variables mkdir resources\\variables"
-
+                        bat 'if not exist resources\\variables mkdir resources\\variables'
                         def yamlContent = """
-APPIUM_SERVER: "http://127.0.0.1:4723"
-PLATFORM_NAME: "Android"
-PLATFORM_VERSION: "${env.SERVER_ANDROID_VERSION}"
-AUTOMATION_NAME: "UiAutomator2"
-DEVICE_NAME: "${deviceId}"
-UDID: "${deviceId}"
-APP_PACKAGE: "${env.APP_PKG}"
-APP_ACTIVITY: "com.sinognss.sm.guide.ui.GuideActivity"
-NO_RESET: true
-AUTO_GRANT_PERMISSIONS: true
-NEW_COMMAND_TIMEOUT: 120
-APP_WAIT_ACTIVITY: "*"
+APPIUM_SERVER: "${params.APPIUM_SERVER}"
+PLATFORM_NAME: "${params.PLATFORM_NAME}"
+PLATFORM_VERSION: "${params.PLATFORM_VERSION}"
+AUTOMATION_NAME: "${params.AUTOMATION_NAME}"
+DEVICE_NAME: "${params.DEVICE_ID}"
+UDID: "${params.DEVICE_ID}"
+APP_PACKAGE: "${params.APP_PACKAGE}"
+APP_ACTIVITY: "${params.APP_ACTIVITY}"
+NO_RESET: ${params.NO_RESET}
+AUTO_GRANT_PERMISSIONS: ${params.AUTO_GRANT_PERMISSIONS}
+NEW_COMMAND_TIMEOUT: ${params.NEW_COMMAND_TIMEOUT}
+APP_WAIT_ACTIVITY: "${params.APP_WAIT_ACTIVITY}"
+UNICODE_KEYBOARD: ${params.UNICODE_KEYBOARD}
+RESET_KEYBOARD: true
+IGNORE_HIDDEN_API_POLICY_ERROR: true
+SKIP_DEVICE_INITIALIZATION: true
 """
-                        writeFile file: 'resources/variables/env_test.yaml', text: yamlContent, encoding: 'UTF-8'
-                        echo "Config generated for Device: ${deviceId}"
+                        writeFile(
+                            file: 'resources/variables/env_test.yaml',
+                            text: yamlContent,
+                            encoding: 'UTF-8'
+                        )
+                        echo "Generated Appium config for ${params.DEVICE_ID}"
                     }
+                }
+            }
+        }
+
+        stage('Prepare Robot arguments') {
+            steps {
+                script {
+                    def rawSelection = params.TEST_ROBOTS?.toString()?.trim()
+                    if (!rawSelection) {
+                        error 'TEST_ROBOTS parameter is empty'
+                    }
+
+                    def selectedTests = rawSelection
+                        .split(/[\r\n,]+/)
+                        .collect { it.trim() }
+                        .findAll { it }
+                        .unique()
+
+                    selectedTests.each { testPath ->
+                        def normalized = testPath.replace('\\', '/')
+                        if (!normalized.startsWith('tests/') ||
+                            !normalized.endsWith('.robot') ||
+                            normalized.contains('../')) {
+                            error "Invalid TEST_ROBOTS path: ${testPath}"
+                        }
+                    }
+
+                    // 通过 tests 根目录和 --suite 运行，确保父级 __init__.robot 的会话初始化生效。
+                    def argumentLines = [
+                        '--outputdir',
+                        "${env.WORKSPACE}\\results"
+                    ]
+                    selectedTests.each { testPath ->
+                        def normalized = testPath.replace('\\', '/')
+                        def relativeSuite = normalized
+                            .substring('tests/'.length(), normalized.length() - '.robot'.length())
+                            .replace('/', '.')
+                        argumentLines.add('--suite')
+                        argumentLines.add("Tests.${relativeSuite}")
+                    }
+                    argumentLines.add('tests')
+
+                    writeFile(
+                        file: 'results/robot_args.txt',
+                        text: argumentLines.join('\r\n') + '\r\n',
+                        encoding: 'UTF-8'
+                    )
+                    writeFile(
+                        file: 'results/selected_test_files.txt',
+                        text: selectedTests.join('\r\n') + '\r\n',
+                        encoding: 'UTF-8'
+                    )
+                    echo "Selected Robot files: ${selectedTests.join(', ')}"
                 }
             }
         }
@@ -163,55 +240,39 @@ APP_WAIT_ACTIVITY: "*"
                 dir("${env.TEST_DIR}") {
                     withEnv([
                         "DEVICE_ID=${params.DEVICE_ID}",
-                        "RF_ARGS=--suite CreateNewProject tests",
+                        "APPIUM_PORT=${params.APPIUM_PORT}",
                         "ANDROID_HOME=${env.ANDROID_HOME_DEFAULT}"
                     ]) {
-                        bat "ci\\jenkins_verify.bat"
+                        bat 'ci\\jenkins_verify.bat'
                     }
                 }
             }
         }
     }
-    
-        stage('Normalize Robot Results') {
-            steps {
-                powershell """
-                    \$ErrorActionPreference = 'Stop'
-    
-                    \$src = Join-Path '${env.WORKSPACE}' '${env.TEST_DIR}\\results'
-                    \$dst = Join-Path '${env.WORKSPACE}' 'results'
-    
-                    if (!(Test-Path \$src)) {
-                        Write-Host "[WARN] Source results dir not found: \$src"
-                        return
-                    }
-    
-                    if (!(Test-Path \$dst)) { New-Item -ItemType Directory -Path \$dst | Out-Null }
-    
-                    # 用 robocopy 复制（robocopy 成功也可能返回 1/2/3，所以要特殊处理）
-                    robocopy \$src \$dst /E /NFL /NDL /NJH /NJS /NC /NS
-                    \$code = \$LASTEXITCODE
-                    if (\$code -ge 8) { throw "robocopy failed with exit code \$code" }
-    
-                    # 核心校验：output.xml 是否存在
-                    \$out = Join-Path \$dst 'output.xml'
-                    if (Test-Path \$out) {
-                        Write-Host "[OK] output.xml ready at: \$out"
-                    } else {
-                        Write-Host "[WARN] output.xml not found under: \$dst"
-                    }
-                """
-            }
-        }
-    
+
     post {
         always {
-            archiveArtifacts artifacts: "results/**, ${env.TEST_DIR}/results/**, appium.log, ${env.TEST_DIR}/appium.log, logcat_*.txt, ${env.TEST_DIR}/logcat_*.txt",
-                             allowEmptyArchive: true
+            archiveArtifacts(
+                artifacts: 'results/**, appium.log, logcat_*.txt',
+                allowEmptyArchive: true
+            )
+            script {
+                if (fileExists('results/output.xml')) {
+                    robot(
+                        outputPath: 'results',
+                        outputFileName: 'output.xml',
+                        logFileName: 'log.html',
+                        reportFileName: 'report.html',
+                        passThreshold: 100.0,
+                        unstableThreshold: 0.0
+                    )
+                }
+            }
             powershell """
-                if (Test-Path '${env.APK_DIR}') { Remove-Item -Recurse -Force '${env.APK_DIR}' }
+                if (Test-Path '${env.APK_DIR}') {
+                    Remove-Item -Recurse -Force '${env.APK_DIR}'
+                }
             """
-            powershell "Stop-Process -Name node -ErrorAction SilentlyContinue"
         }
     }
 }
