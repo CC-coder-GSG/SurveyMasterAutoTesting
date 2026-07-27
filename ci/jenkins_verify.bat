@@ -19,8 +19,15 @@ set "PY_EXE=%PY_HOME%\python.exe"
 set "PY_SCRIPTS=%PY_HOME%\Scripts"
 set "PATH=%PY_HOME%;%PY_SCRIPTS%;%PATH%"
 
-rem ---- Force NodeJS and npm bin ----
-set "NODE_HOME=C:\Program Files\nodejs"
+rem ---- Locate NodeJS and npm bin ----
+set "NODE_EXE="
+if defined NODE_HOME if exist "%NODE_HOME%\node.exe" set "NODE_EXE=%NODE_HOME%\node.exe"
+for /f "delims=" %%p in ('where node.exe 2^>nul') do (
+  if not defined NODE_EXE set "NODE_EXE=%%p"
+)
+if not defined NODE_EXE if exist "D:\dddddddddddddddddd\nodejs\node.exe" set "NODE_EXE=D:\dddddddddddddddddd\nodejs\node.exe"
+if not defined NODE_EXE if exist "C:\Program Files\nodejs\node.exe" set "NODE_EXE=C:\Program Files\nodejs\node.exe"
+if defined NODE_EXE for %%p in ("%NODE_EXE%") do set "NODE_HOME=%%~dpp"
 set "NPM_BIN=%APPDATA%\npm"
 set "PATH=%NODE_HOME%;%NPM_BIN%;%PATH%"
 
@@ -70,8 +77,13 @@ call :check_pip_pkg pyyaml || (set "ROBOT_RC=10" & goto :finally)
 
 rem ---- Env check ----
 echo [INFO] ===== ENV CHECK =====
-where node >nul 2>&1 || (echo [ERROR] node not found in PATH. & set "ROBOT_RC=2" & goto :finally)
-node -v
+if not defined NODE_EXE (
+  echo [ERROR] node.exe not found in PATH or known installation paths.
+  set "ROBOT_RC=2"
+  goto :finally
+)
+echo [INFO] NODE_EXE=%NODE_EXE%
+"%NODE_EXE%" -v
 where npm >nul 2>&1 || (echo [ERROR] npm not found in PATH. & set "ROBOT_RC=2" & goto :finally)
 call npm -v >nul 2>&1 || (echo [ERROR] npm failed to run. & set "ROBOT_RC=2" & goto :finally)
 
