@@ -16,6 +16,7 @@ Handle First Launch Experience
         Log    [STARTUP] 接受隐私协议
         Tap    ${Startup.PRIVACY_AGREEMENT_CONFIRM}
         Handle All Files Access Permission If Needed    15s
+        Handle Runtime Permission Dialogs
         ${style_visible}=    Run Keyword And Return Status
         ...    Wait Visible
         ...    ${Startup.STYLE_SAVE_BUTTON}
@@ -24,4 +25,18 @@ Handle First Launch Experience
             Log    [STARTUP] 保存默认界面风格
             Tap    ${Startup.STYLE_SAVE_BUTTON}
         END
+    END
+
+Handle Runtime Permission Dialogs
+    [Documentation]    处理首次启动时可能连续出现的 Android 运行时权限弹窗。
+    FOR    ${index}    IN RANGE    5
+        ${permission_visible}=    Run Keyword And Return Status
+        ...    Wait Visible
+        ...    ${Startup.RUNTIME_PERMISSION_ALLOW_WHILE_USING}
+        ...    3s
+        IF    not $permission_visible
+            BREAK
+        END
+        Tap    ${Startup.RUNTIME_PERMISSION_ALLOW_WHILE_USING}
+        Wait Page Stable    0.5
     END
