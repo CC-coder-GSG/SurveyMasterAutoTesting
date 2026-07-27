@@ -113,8 +113,13 @@ pipeline {
                     \$ErrorActionPreference = 'Continue'
                     \$env:JENKINS_SERVER_COOKIE = 'surveymaster-adb-daemon'
                     \$env:JENKINS_NODE_COOKIE = 'surveymaster-adb-daemon'
+                    \$adbWorkingDir = Split-Path -Parent \$adb
+                    Push-Location \$adbWorkingDir
+                    \$killServerCommand = '""{0}" kill-server 1>nul 2>nul"' -f \$adb
+                    & \$env:ComSpec /d /s /c \$killServerCommand
                     \$startServerCommand = '""{0}" start-server 1>nul 2>nul"' -f \$adb
                     & \$env:ComSpec /d /s /c \$startServerCommand
+                    Pop-Location
                     \$env:JENKINS_SERVER_COOKIE = \$savedServerCookie
                     \$env:JENKINS_NODE_COOKIE = \$savedNodeCookie
                     \$ErrorActionPreference = \$savedErrorAction
