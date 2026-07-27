@@ -20,7 +20,8 @@ Open SurveyMaster App
     ...    autoGrantPermissions=${AUTO_GRANT_PERMISSIONS}
     ...    newCommandTimeout=${NEW_COMMAND_TIMEOUT}
     ...    unicodeKeyboard=${UNICODE_KEYBOARD}
-    ...    resetKeyboard=${RESET_KEYBOARD}
+    ...    ignoreHiddenApiPolicyError=${IGNORE_HIDDEN_API_POLICY_ERROR}
+    ...    skipDeviceInitialization=${SKIP_DEVICE_INITIALIZATION}
 
 Close SurveyMaster App
     Close Application

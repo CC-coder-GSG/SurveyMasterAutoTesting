@@ -164,6 +164,10 @@ if /i not "%STATE%"=="device" (
 )
 echo [OK] Device "%DEVICE_ID%" is online (device).
 
+rem Remove stale Appium Settings so the pinned UiAutomator2 driver installs its matching helper.
+echo [INFO] ===== RESET APPIUM SETTINGS HELPER =====
+"%ADB_EXE%" -s "%DEVICE_ID%" uninstall io.appium.settings >nul 2>&1
+
 rem ---- Appium start ----
 echo [INFO] ===== CLEAN PORT %APPIUM_PORT% =====
 call :kill_port %APPIUM_PORT%

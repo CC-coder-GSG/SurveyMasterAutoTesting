@@ -193,7 +193,7 @@ APP_WAIT_ACTIVITY: "${params.APP_WAIT_ACTIVITY}"
 UNICODE_KEYBOARD: ${params.UNICODE_KEYBOARD}
 RESET_KEYBOARD: true
 IGNORE_HIDDEN_API_POLICY_ERROR: true
-SKIP_DEVICE_INITIALIZATION: true
+SKIP_DEVICE_INITIALIZATION: false
 """
                         writeFile(
                             file: 'resources/variables/env_test.yaml',
