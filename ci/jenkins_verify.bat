@@ -97,12 +97,14 @@ call npm -v >nul 2>&1 || (echo [ERROR] npm failed to run. & set "ROBOT_RC=2" & g
 rem ---- Use a pinned, workspace-local Appium core ----
 rem The Jenkins global npm tree may drift or become internally incompatible.
 set "APPIUM_VERSION=2.19.0"
+set "UIAUTOMATOR2_VERSION=4.1.5"
 if not "%WORKSPACE%"=="" (
   set "APPIUM_TOOLS_DIR=%WORKSPACE%\.ci-tools\appium-%APPIUM_VERSION%"
 ) else (
   set "APPIUM_TOOLS_DIR=%ROOT%\.ci-tools\appium-%APPIUM_VERSION%"
 )
 set "APPIUM_CMD=%APPIUM_TOOLS_DIR%\node_modules\.bin\appium.cmd"
+set "APPIUM_HOME=%APPIUM_TOOLS_DIR%\home-uiautomator2-%UIAUTOMATOR2_VERSION%"
 if not exist "%APPIUM_CMD%" (
   echo [INFO] Installing Appium %APPIUM_VERSION% into %APPIUM_TOOLS_DIR%
   call npm install --prefix "%APPIUM_TOOLS_DIR%" --no-audit --no-fund --omit=dev "appium@%APPIUM_VERSION%"
@@ -116,6 +118,15 @@ if not exist "%APPIUM_CMD%" (
   echo [ERROR] Pinned Appium command not found after installation: %APPIUM_CMD%
   set "ROBOT_RC=2"
   goto :finally
+)
+if not exist "%APPIUM_HOME%\node_modules\appium-uiautomator2-driver\package.json" (
+  echo [INFO] Installing UiAutomator2 %UIAUTOMATOR2_VERSION% into %APPIUM_HOME%
+  call "%APPIUM_CMD%" driver install "uiautomator2@%UIAUTOMATOR2_VERSION%"
+  if errorlevel 1 (
+    echo [ERROR] Failed to install UiAutomator2 %UIAUTOMATOR2_VERSION%.
+    set "ROBOT_RC=2"
+    goto :finally
+  )
 )
 
 rem ---- Device check (encryption-safe) ----
