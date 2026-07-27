@@ -22,9 +22,16 @@ set "PATH=%PY_HOME%;%PY_SCRIPTS%;%PATH%"
 rem ---- Locate NodeJS and npm bin ----
 set "NODE_EXE="
 if defined NODE_HOME if exist "%NODE_HOME%\node.exe" set "NODE_EXE=%NODE_HOME%\node.exe"
+if not defined NODE_EXE if defined NVM_SYMLINK if exist "%NVM_SYMLINK%\node.exe" set "NODE_EXE=%NVM_SYMLINK%\node.exe"
+if not defined NODE_EXE if defined NVM_HOME (
+  for /f "delims=" %%p in ('where /r "%NVM_HOME%" node.exe 2^>nul') do (
+    if not defined NODE_EXE set "NODE_EXE=%%p"
+  )
+)
 for /f "delims=" %%p in ('where node.exe 2^>nul') do (
   if not defined NODE_EXE set "NODE_EXE=%%p"
 )
+if not defined NODE_EXE if exist "C:\nvm4w\nodejs\node.exe" set "NODE_EXE=C:\nvm4w\nodejs\node.exe"
 if not defined NODE_EXE if exist "D:\dddddddddddddddddd\nodejs\node.exe" set "NODE_EXE=D:\dddddddddddddddddd\nodejs\node.exe"
 if not defined NODE_EXE if exist "C:\Program Files\nodejs\node.exe" set "NODE_EXE=C:\Program Files\nodejs\node.exe"
 if defined NODE_EXE for %%p in ("%NODE_EXE%") do set "NODE_HOME=%%~dpp"
