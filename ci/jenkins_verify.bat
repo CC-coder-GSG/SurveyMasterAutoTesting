@@ -127,8 +127,14 @@ if not exist "%ADB_EXE%" (
 )
 
 rem start adb (swallow output using cmd.exe)
+set "SAVED_JENKINS_SERVER_COOKIE=%JENKINS_SERVER_COOKIE%"
+set "SAVED_JENKINS_NODE_COOKIE=%JENKINS_NODE_COOKIE%"
+set "JENKINS_SERVER_COOKIE=surveymaster-adb-daemon"
+set "JENKINS_NODE_COOKIE=surveymaster-adb-daemon"
 cmd /c ""%ADB_EXE%" kill-server 1>nul 2>nul"
 cmd /c ""%ADB_EXE%" start-server 1>nul 2>nul"
+set "JENKINS_SERVER_COOKIE=%SAVED_JENKINS_SERVER_COOKIE%"
+set "JENKINS_NODE_COOKIE=%SAVED_JENKINS_NODE_COOKIE%"
 powershell -NoProfile -Command "Start-Sleep -Seconds 1"
 
 rem wait-for-device (avoid parsing text)

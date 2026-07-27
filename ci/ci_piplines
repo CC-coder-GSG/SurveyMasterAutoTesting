@@ -108,9 +108,15 @@ pipeline {
                     Write-Host "Checking device: \$targetDevice"
                     # 通过 cmd 丢弃 daemon 的输出句柄，避免新启动的 ADB 服务让 Jenkins PowerShell 步骤无法退出。
                     \$savedErrorAction = \$ErrorActionPreference
+                    \$savedServerCookie = \$env:JENKINS_SERVER_COOKIE
+                    \$savedNodeCookie = \$env:JENKINS_NODE_COOKIE
                     \$ErrorActionPreference = 'Continue'
+                    \$env:JENKINS_SERVER_COOKIE = 'surveymaster-adb-daemon'
+                    \$env:JENKINS_NODE_COOKIE = 'surveymaster-adb-daemon'
                     \$startServerCommand = '""{0}" start-server 1>nul 2>nul"' -f \$adb
                     & \$env:ComSpec /d /s /c \$startServerCommand
+                    \$env:JENKINS_SERVER_COOKIE = \$savedServerCookie
+                    \$env:JENKINS_NODE_COOKIE = \$savedNodeCookie
                     \$ErrorActionPreference = \$savedErrorAction
 
                     \$online = \$false
