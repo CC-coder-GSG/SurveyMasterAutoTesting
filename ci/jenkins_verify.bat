@@ -228,6 +228,17 @@ set "ROBOT_RC=%ERRORLEVEL%"
 echo [INFO] ===== STOP APPIUM =====
 call :stop_appium %APPIUM_PORT%
 
+echo [INFO] ===== STOP ADB =====
+set "SAVED_JENKINS_SERVER_COOKIE=%JENKINS_SERVER_COOKIE%"
+set "SAVED_JENKINS_NODE_COOKIE=%JENKINS_NODE_COOKIE%"
+set "JENKINS_SERVER_COOKIE=surveymaster-adb-daemon"
+set "JENKINS_NODE_COOKIE=surveymaster-adb-daemon"
+pushd "%ANDROID_HOME%\platform-tools"
+cmd /c ""%ADB_EXE%" kill-server 1>nul 2>nul"
+popd
+set "JENKINS_SERVER_COOKIE=%SAVED_JENKINS_SERVER_COOKIE%"
+set "JENKINS_NODE_COOKIE=%SAVED_JENKINS_NODE_COOKIE%"
+
 echo [INFO] ===== RESULT FILES IN OUTDIR =====
 if exist "%OUTDIR%\output.xml" (
   echo [OK] output.xml exists: %OUTDIR%\output.xml

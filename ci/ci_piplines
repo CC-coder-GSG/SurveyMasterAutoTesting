@@ -147,8 +147,10 @@ pipeline {
 
                     Write-Host "Installing \$apk"
                     & \$adb -s \$targetDevice install -r -d \$apk | Out-Host
-                    if (\$LASTEXITCODE -ne 0) {
-                        throw "APK installation failed with exit code \$LASTEXITCODE"
+                    \$installExitCode = \$LASTEXITCODE
+                    & \$env:ComSpec /d /s /c \$killServerCommand
+                    if (\$installExitCode -ne 0) {
+                        throw "APK installation failed with exit code \$installExitCode"
                     }
                 """
             }
