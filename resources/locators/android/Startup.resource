@@ -7,3 +7,5 @@
 ...    STYLE_SAVE_BUTTON=android=new UiSelector().text("保存")
 # Android 运行时权限“使用应用时允许”：系统权限控制器的稳定 resource-id。
 ...    RUNTIME_PERMISSION_ALLOW_WHILE_USING=id=com.android.permissioncontroller:id/permission_allow_foreground_only_button
+# Android 运行时权限通用“允许”：电话等权限弹窗使用该 resource-id。
+...    RUNTIME_PERMISSION_ALLOW=id=com.android.permissioncontroller:id/permission_allow_button

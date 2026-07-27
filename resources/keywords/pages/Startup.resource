@@ -30,13 +30,23 @@ Handle First Launch Experience
 Handle Runtime Permission Dialogs
     [Documentation]    处理首次启动时可能连续出现的 Android 运行时权限弹窗。
     FOR    ${index}    IN RANGE    5
-        ${permission_visible}=    Run Keyword And Return Status
+        ${foreground_permission_visible}=    Run Keyword And Return Status
         ...    Wait Visible
         ...    ${Startup.RUNTIME_PERMISSION_ALLOW_WHILE_USING}
-        ...    3s
-        IF    not $permission_visible
-            BREAK
+        ...    1.5s
+        IF    ${foreground_permission_visible}
+            Tap    ${Startup.RUNTIME_PERMISSION_ALLOW_WHILE_USING}
+            Wait Page Stable    0.5
+            CONTINUE
         END
-        Tap    ${Startup.RUNTIME_PERMISSION_ALLOW_WHILE_USING}
-        Wait Page Stable    0.5
+        ${permission_visible}=    Run Keyword And Return Status
+        ...    Wait Visible
+        ...    ${Startup.RUNTIME_PERMISSION_ALLOW}
+        ...    1.5s
+        IF    ${permission_visible}
+            Tap    ${Startup.RUNTIME_PERMISSION_ALLOW}
+            Wait Page Stable    0.5
+            CONTINUE
+        END
+        BREAK
     END
