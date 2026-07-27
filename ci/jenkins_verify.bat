@@ -94,14 +94,26 @@ echo [INFO] NODE_EXE=%NODE_EXE%
 where npm >nul 2>&1 || (echo [ERROR] npm not found in PATH. & set "ROBOT_RC=2" & goto :finally)
 call npm -v >nul 2>&1 || (echo [ERROR] npm failed to run. & set "ROBOT_RC=2" & goto :finally)
 
-rem ---- Locate appium.cmd ----
-set "APPIUM_CMD=%NPM_BIN%\appium.cmd"
+rem ---- Use a pinned, workspace-local Appium core ----
+rem The Jenkins global npm tree may drift or become internally incompatible.
+set "APPIUM_VERSION=2.19.0"
+if not "%WORKSPACE%"=="" (
+  set "APPIUM_TOOLS_DIR=%WORKSPACE%\.ci-tools\appium-%APPIUM_VERSION%"
+) else (
+  set "APPIUM_TOOLS_DIR=%ROOT%\.ci-tools\appium-%APPIUM_VERSION%"
+)
+set "APPIUM_CMD=%APPIUM_TOOLS_DIR%\node_modules\.bin\appium.cmd"
 if not exist "%APPIUM_CMD%" (
-  for /f "delims=" %%p in ('where appium 2^>nul') do set "APPIUM_CMD=%%p"
+  echo [INFO] Installing Appium %APPIUM_VERSION% into %APPIUM_TOOLS_DIR%
+  call npm install --prefix "%APPIUM_TOOLS_DIR%" --no-audit --no-fund --omit=dev "appium@%APPIUM_VERSION%"
+  if errorlevel 1 (
+    echo [ERROR] Failed to install Appium %APPIUM_VERSION%.
+    set "ROBOT_RC=2"
+    goto :finally
+  )
 )
 if not exist "%APPIUM_CMD%" (
-  echo [ERROR] appium command not found.
-  echo [HINT] Run: npm i -g appium
+  echo [ERROR] Pinned Appium command not found after installation: %APPIUM_CMD%
   set "ROBOT_RC=2"
   goto :finally
 )
@@ -141,6 +153,13 @@ echo [INFO] ===== START APPIUM =====
 set "APPIUM_LOG=%OUTDIR%\appium.log"
 echo [INFO] APPIUM_CMD=%APPIUM_CMD%
 echo [INFO] APPIUM_LOG=%APPIUM_LOG%
+echo [INFO] ===== APPIUM VERSION =====
+call "%APPIUM_CMD%" --version
+if errorlevel 1 (
+  echo [ERROR] Appium command failed before startup.
+  set "ROBOT_RC=4"
+  goto :finally
+)
 
 start "appium" /b cmd /c "call ""%APPIUM_CMD%"" --address 127.0.0.1 --port %APPIUM_PORT% --log-level info --local-timezone 1> ""%APPIUM_LOG%"" 2>&1"
 powershell -NoProfile -Command "Start-Sleep -Seconds 2"
@@ -150,6 +169,11 @@ call :wait_port %APPIUM_PORT% 90
 if errorlevel 1 (
   echo [ERROR] Appium not ready on port %APPIUM_PORT% within timeout.
   echo [HINT] Check log: %APPIUM_LOG%
+  if exist "%APPIUM_LOG%" (
+    echo [INFO] ===== APPIUM LOG BEGIN =====
+    type "%APPIUM_LOG%"
+    echo [INFO] ===== APPIUM LOG END =====
+  )
   set "ROBOT_RC=4"
   goto :finally
 )
@@ -221,12 +245,19 @@ exit /b 0
 :wait_port
 set "PORT=%~1"
 set "SECONDS=%~2"
-for /l %%i in (1,1,%SECONDS%) do (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "try{ $c = New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
-  if not errorlevel 1 exit /b 0
-  powershell -NoProfile -Command "Start-Sleep -Seconds 1"
-)
-exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$deadline = [DateTime]::UtcNow.AddSeconds(%SECONDS%);" ^
+  "do {" ^
+  "  try {" ^
+  "    $c = New-Object Net.Sockets.TcpClient;" ^
+  "    $ar = $c.BeginConnect('127.0.0.1', %PORT%, $null, $null);" ^
+  "    if ($ar.AsyncWaitHandle.WaitOne(500) -and $c.Connected) { $c.EndConnect($ar); $c.Close(); exit 0 };" ^
+  "    $c.Close();" ^
+  "  } catch {};" ^
+  "  Start-Sleep -Milliseconds 500;" ^
+  "} while ([DateTime]::UtcNow -lt $deadline);" ^
+  "exit 1" >nul 2>&1
+exit /b %ERRORLEVEL%
 
 :stop_appium
 set "PORT=%~1"
