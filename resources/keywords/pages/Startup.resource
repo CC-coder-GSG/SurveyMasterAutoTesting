@@ -2,6 +2,7 @@
 Documentation    首次启动页面操作；只处理安装后可能出现的隐私协议和界面风格确认。
 Resource    ../../locators/android/Startup.resource
 Resource    ../common/actions.resource
+Resource    ../common/session.resource
 Resource    ../common/wait.resource
 
 *** Keywords ***
@@ -14,6 +15,7 @@ Handle First Launch Experience
     IF    ${privacy_visible}
         Log    [STARTUP] 接受隐私协议
         Tap    ${Startup.PRIVACY_AGREEMENT_CONFIRM}
+        Handle All Files Access Permission If Needed    15s
         ${style_visible}=    Run Keyword And Return Status
         ...    Wait Visible
         ...    ${Startup.STYLE_SAVE_BUTTON}

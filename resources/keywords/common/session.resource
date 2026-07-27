@@ -28,10 +28,11 @@ Close SurveyMaster App
 
 Handle All Files Access Permission If Needed
     [Documentation]    所有文件访问权限 / 授予所有文件的管理权限
+    [Arguments]    ${timeout}=2s
     ${onPage}=    Run Keyword And Return Status
     ...    Wait Until Page Contains Element
     ...    android=new UiSelector().textContains("所有文件")
-    ...    2s
+    ...    ${timeout}
 
     IF    ${onPage}
         Log    [PERM] On MANAGE_EXTERNAL_STORAGE page
