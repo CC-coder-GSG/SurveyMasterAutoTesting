@@ -15,6 +15,7 @@ pipeline {
         TEST_REPO_URL = "git@github.com:CC-coder-GSG/SurveyMasterAutoTesting.git"
         DEFAULT_TEST_BRANCH = "main"
         TEST_DIR = "autotest"
+        WECHAT_WEBHOOK = credentials('wecom_robot_webhook')
     }
 
     stages {
@@ -259,6 +260,32 @@ SKIP_DEVICE_INITIALIZATION: false
             }
         }
 
+        stage('Notify Start') {
+            steps {
+                powershell(script: '''
+                    $ErrorActionPreference = 'Continue'
+                    $notify = Join-Path $env:WORKSPACE "$env:TEST_DIR\\ci\\wecom_notify.ps1"
+                    $plan = Join-Path $env:WORKSPACE 'results\\selected_test_files.txt'
+
+                    if (-not (Test-Path -LiteralPath $notify)) {
+                        Write-Host "[WARN] wecom_notify.ps1 not found: $notify"
+                        exit 0
+                    }
+
+                    & $notify `
+                        -Event start `
+                        -Webhook "$env:WECHAT_WEBHOOK" `
+                        -BuildUrl "$env:BUILD_URL" `
+                        -JobName "$env:JOB_NAME" `
+                        -BuildNumber "$env:BUILD_NUMBER" `
+                        -TestFilesPath $plan `
+                        -MaxFiles 30
+
+                    exit 0
+                ''')
+            }
+        }
+
         stage('Run AutoTests') {
             options { timeout(time: 60, unit: 'MINUTES') }
             steps {
@@ -293,6 +320,38 @@ SKIP_DEVICE_INITIALIZATION: false
                     )
                 }
             }
+            powershell(script: '''
+                $ErrorActionPreference = 'Continue'
+                $notify = Join-Path $env:WORKSPACE "$env:TEST_DIR\\ci\\wecom_notify.ps1"
+
+                if (-not (Test-Path -LiteralPath $notify)) {
+                    Write-Host "[WARN] wecom_notify.ps1 not found: $notify"
+                    exit 0
+                }
+
+                $outputXml = Join-Path $env:WORKSPACE 'results\\output.xml'
+                if (Test-Path -LiteralPath $outputXml) {
+                    Write-Host '[INFO] Send finish notify with output.xml'
+                    & $notify `
+                        -Event finish `
+                        -Webhook "$env:WECHAT_WEBHOOK" `
+                        -BuildUrl "$env:BUILD_URL" `
+                        -OutputXml $outputXml `
+                        -JobName "$env:JOB_NAME" `
+                        -BuildNumber "$env:BUILD_NUMBER"
+                } else {
+                    Write-Host '[INFO] Send finish notify without output.xml (fallback)'
+                    & $notify `
+                        -Event finish `
+                        -Webhook "$env:WECHAT_WEBHOOK" `
+                        -BuildUrl "$env:BUILD_URL" `
+                        -JobName "$env:JOB_NAME" `
+                        -BuildNumber "$env:BUILD_NUMBER" `
+                        -ExitCode 1
+                }
+
+                exit 0
+            ''')
             powershell """
                 if (Test-Path '${env.APK_DIR}') {
                     Remove-Item -Recurse -Force '${env.APK_DIR}'
