@@ -1,6 +1,7 @@
 *** Settings ***
 Library    AppiumLibrary
 
+
 *** Variables ***
 ${REMOTE_URL}    http://127.0.0.1:4723
 ${UDID}          4e83cae7

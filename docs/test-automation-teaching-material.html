@@ -1,0 +1,289 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>软件测试自动化讲义</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=swap">
+<style>
+  :root{
+    color-scheme:light;
+    --bg:#F3F6F7; --surface:#FFFFFF; --surface-2:#EAF1F3;
+    --ink:#15242C; --ink-2:#48595F; --ink-3:#6F8188;
+    --line:#D6DFE3;
+    --accent:#0C6B84; --accent-ink:#0A5A70; --accent-soft:#E1EEF2;
+    --chip-bg:#ECF2F4;
+    --shadow:0 1px 2px rgba(21,36,44,.05),0 10px 28px -20px rgba(21,36,44,.22);
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+    --serif:"Noto Serif SC","Songti SC",serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      color-scheme:dark;
+      --bg:#0F171B; --surface:#151F24; --surface-2:#1B2A31;
+      --ink:#E7EDEF; --ink-2:#A8B6BC; --ink-3:#7E8F95;
+      --line:#283840;
+      --accent:#53B3CB; --accent-ink:#79C9DC; --accent-soft:#17333C;
+      --chip-bg:#1E2D34;
+      --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -22px rgba(0,0,0,.65);
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --bg:#0F171B; --surface:#151F24; --surface-2:#1B2A31;
+    --ink:#E7EDEF; --ink-2:#A8B6BC; --ink-3:#7E8F95;
+    --line:#283840;
+    --accent:#53B3CB; --accent-ink:#79C9DC; --accent-soft:#17333C;
+    --chip-bg:#1E2D34;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -22px rgba(0,0,0,.65);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.75;-webkit-font-smoothing:antialiased}
+  ::selection{background:var(--accent-soft);color:var(--ink)}
+  .wrap{max-width:960px;margin-inline:auto;padding-inline:clamp(18px,4.5vw,40px)}
+  code{font-family:var(--mono);font-size:.86em}
+
+  .hero{padding-block:clamp(52px,9vw,92px) clamp(42px,6vw,58px)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.24em;color:var(--accent-ink);margin:0}
+  h1{font-family:var(--serif);font-weight:700;font-size:clamp(30px,4.8vw,44px);line-height:1.32;margin:16px 0 0;text-wrap:balance}
+  .dek{margin:16px 0 0;color:var(--ink-2);font-size:clamp(15px,1.9vw,17px);max-width:44em;text-wrap:pretty}
+  .meta{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);color:var(--ink-3);font-size:13.5px;display:flex;flex-wrap:wrap;gap:6px 30px}
+
+  .section{border-top:1px solid var(--line);padding-block:clamp(46px,7vw,70px)}
+  .part{font-family:var(--mono);font-size:12px;letter-spacing:.2em;color:var(--ink-3);margin:0}
+  h2{font-family:var(--serif);font-weight:600;font-size:clamp(23px,3.4vw,30px);line-height:1.4;margin:12px 0 0;text-wrap:balance}
+  .lede{margin:14px 0 0;color:var(--ink-2);max-width:46em;text-wrap:pretty}
+  .sub{margin:40px 0 0;font-size:17px;font-weight:700;text-wrap:balance}
+
+  .def{margin-top:26px;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:clamp(24px,4vw,36px)}
+  .def p{margin:0;font-family:var(--serif);font-weight:600;font-size:clamp(17px,2.5vw,21px);line-height:1.95;max-width:36em}
+  .def em{font-style:normal;color:var(--accent-ink)}
+
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-top:22px}
+  .grid-2>div{background:var(--surface);padding:20px 24px}
+  .grid-2 h3{margin:0;font-size:15.5px;font-weight:700}
+  .tick::before{content:"";display:inline-block;width:6px;height:6px;border-radius:2px;background:var(--accent);margin-right:9px;vertical-align:2px}
+  .grid-2 p{margin:8px 0 0;font-size:14.5px;color:var(--ink-2);line-height:1.7}
+
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:18px}
+  .split .card{background:var(--surface-2);border-radius:12px;padding:20px 24px}
+  .card-label{margin:0;font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--accent-ink)}
+  .split h4{margin:8px 0 0;font-size:16px;font-weight:700}
+
+  ul.plain{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:8px}
+  ul.plain li{position:relative;padding-left:17px;font-size:14.5px;color:var(--ink-2);line-height:1.7}
+  ul.plain li::before{content:"";position:absolute;left:2px;top:.62em;width:5px;height:5px;border-radius:1.5px;background:var(--accent)}
+
+  ul.myths{list-style:none;padding:0;margin:22px 0 0;display:grid;gap:14px}
+  .myth{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start}
+  .tag{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;color:var(--accent-ink);background:var(--accent-soft);padding:3px 9px;border-radius:6px;margin-top:5px}
+  .myth p{margin:0;max-width:44em}
+
+  .pyramid{margin:28px 0 0}
+  .pyramid svg{display:block;width:100%;max-width:700px;height:auto;margin-inline:auto;color:var(--ink)}
+  .pyramid text{font-family:var(--sans)}
+  .pyramid .tooltxt{font-family:var(--mono)}
+  .band{fill:var(--accent-soft)}
+  .band.b1{fill-opacity:.5}
+  .band.b2{fill-opacity:.75}
+  .band.b3{fill-opacity:1}
+  .pyramid figcaption{margin:14px auto 0;max-width:42em;text-align:center;font-size:13.5px;color:var(--ink-3);line-height:1.7}
+
+  .tablewrap{margin-top:26px;overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+  table{border-collapse:collapse;width:100%;min-width:720px;font-size:14.5px}
+  th{font-size:12px;letter-spacing:.14em;color:var(--ink-3);font-weight:500;text-align:left;padding:15px 20px 11px;border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:14px 20px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.65}
+  tbody tr:last-child td{border-bottom:0}
+  td.layer{font-weight:700;white-space:nowrap;font-size:14px}
+  td.tools code{display:inline-block;background:var(--chip-bg);color:var(--accent-ink);padding:2px 8px;border-radius:6px;margin:2px 4px 2px 0;white-space:nowrap;font-size:12.5px}
+  td.note{color:var(--ink-2);font-size:14px}
+
+  .instance{margin-top:22px;background:var(--accent-soft);border-radius:12px;padding:22px 26px}
+  .inst-label{margin:0;font-family:var(--mono);font-size:12px;letter-spacing:.14em;color:var(--accent-ink)}
+  .inst-line{margin:14px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+  .inst-line code{background:var(--surface);color:var(--ink);padding:4px 11px;border-radius:7px;font-size:13px}
+  .arrow{color:var(--ink-3)}
+  .inst-note{margin:14px 0 0;font-size:14px;color:var(--ink-2);max-width:52em}
+
+  .benefits h3{margin:0 0 8px;font-size:15.5px;font-weight:700}
+  .benefits p{margin:0;font-size:14.5px;color:var(--ink-2);line-height:1.7}
+
+  .limits{margin-top:26px;background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:clamp(22px,3.4vw,30px)}
+  .limits h3{margin:0;font-size:17px;font-weight:700}
+  .limits-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 44px}
+  .limits h4{margin:18px 0 0;font-size:14.5px;font-weight:700}
+  .principle{margin:24px 0 0;padding-top:18px;border-top:1px solid var(--line);font-weight:700;color:var(--accent-ink);font-size:15px;max-width:54em}
+
+  ol.steps{margin:26px 0 0;padding-left:1.6em;columns:2;column-gap:46px;font-size:15px}
+  ol.steps li{padding-left:2px;margin-bottom:10px;break-inside:avoid}
+  ol.steps li::marker{font-family:var(--mono);color:var(--accent-ink);font-size:13px}
+
+  footer{border-top:1px solid var(--line);padding-block:34px 48px;color:var(--ink-3);font-size:13px}
+
+  @media (max-width:680px){
+    .grid-2,.split,.limits-grid{grid-template-columns:1fr}
+    ol.steps{columns:1}
+    .pyramid figcaption{text-align:left}
+  }
+</style>
+
+<header class="hero"><div class="wrap">
+  <p class="eyebrow">教学参考材料</p>
+  <h1>软件测试自动化讲义</h1>
+  <p class="dek">回答三个问题:它是什么(含义)、用什么做(常用工具)、值不值得做(能达到的作用)。内容按教学顺序组织,可直接裁剪进 PPT。</p>
+  <div class="meta">
+    <span>适用:测试入门培训 · 团队质量宣讲</span>
+    <span>含:定义 · 测试金字塔 · 工具速查表 · 收益清单 · PPT 结构建议</span>
+  </div>
+</div></header>
+
+<main>
+<section class="section" id="meaning"><div class="wrap">
+  <p class="part">第一部分</p>
+  <h2>什么是软件测试自动化</h2>
+  <p class="lede">先把概念立清楚:它是什么、由谁完成哪一步、和手工测试又是什么关系。</p>
+
+  <div class="def">
+    <p>软件测试自动化,是指用<em>程序与工具</em>代替人工操作,按预设步骤<em>自动执行</em>测试,自动将实际结果与预期结果<em>比对(断言)</em>,并自动<em>输出报告</em>的过程——同一套用例可以无限次重复执行。</p>
+  </div>
+
+  <div class="grid-2">
+    <div><h3 class="tick">工具执行</h3><p>点击、输入、调用接口等操作由脚本和框架完成,不依赖人工现场操作。</p></div>
+    <div><h3 class="tick">预设步骤与预期</h3><p>测试路径、输入数据和预期结果,在设计阶段就固定下来。</p></div>
+    <div><h3 class="tick">自动断言</h3><p>机器逐项比对"实际结果"与"预期结果",不靠人眼判断对错。</p></div>
+    <div><h3 class="tick">报告与重复</h3><p>每次运行自动记录结果;用例可随时、定时、无限次重复执行。</p></div>
+  </div>
+
+  <h3 class="sub">自动化的是「执行」,不是「设计」</h3>
+  <div class="split">
+    <div class="card">
+      <p class="card-label">人 · 设计一次</p>
+      <h4>机器无法替你做</h4>
+      <ul class="plain">
+        <li>设计测试用例与预期结果</li>
+        <li>搭建自动化框架、编写与调试脚本</li>
+        <li>分析失败原因、更新维护脚本</li>
+      </ul>
+    </div>
+    <div class="card">
+      <p class="card-label">机器 · 执行 N 次</p>
+      <h4>人不想反复做的事</h4>
+      <ul class="plain">
+        <li>按脚本操作被测软件</li>
+        <li>逐项比对实际与预期(断言)</li>
+        <li>生成报告,随时或定时重复执行</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 class="sub">三个常见误解</h3>
+  <ul class="myths">
+    <li class="myth"><span class="tag">误解</span><p><strong>"自动化就是录制回放。"</strong>录制只是快速产出脚本的辅助手段;可维护的自动化仍需要脚本化设计、封装与数据管理。</p></li>
+    <li class="myth"><span class="tag">误解</span><p><strong>"自动化能发现更多新缺陷。"</strong>它的主要价值是保证已有功能不退化(回归);发现新问题仍依赖人设计的新用例与探索性测试。</p></li>
+    <li class="myth"><span class="tag">误解</span><p><strong>"目标是把用例 100% 自动化。"</strong>范围由投入产出比决定,通常优先覆盖核心回归路径,并非越多越好。</p></li>
+  </ul>
+</div></section>
+
+<section class="section" id="tools"><div class="wrap">
+  <p class="part">第二部分</p>
+  <h2>常用工具</h2>
+  <p class="lede">工具按「测试层次」来认识最不容易乱——测试金字塔先给出全局分工,再看每层的代表工具。</p>
+
+  <figure class="pyramid">
+    <svg viewBox="0 0 800 400" role="img" aria-label="测试金字塔:自下而上依次为单元测试、接口/服务测试、UI 测试;越往下用例数量越多、执行越快、维护成本越低">
+      <polygon class="band b1" points="400,30 300,140 500,140"/>
+      <polygon class="band b2" points="300,140 500,140 600,250 200,250"/>
+      <polygon class="band b3" points="200,250 600,250 700,360 100,360"/>
+      <path d="M400 30 L100 360 L700 360 Z" fill="none" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.5" stroke-linejoin="round"/>
+      <line x1="300" y1="140" x2="500" y2="140" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.2"/>
+      <line x1="200" y1="250" x2="600" y2="250" stroke="currentColor" stroke-opacity="0.35" stroke-width="1.2"/>
+      <text x="400" y="129" text-anchor="middle" font-size="16" font-weight="700" fill="currentColor">UI 测试</text>
+      <text x="400" y="199" text-anchor="middle" font-size="16" font-weight="700" fill="currentColor">接口 / 服务测试</text>
+      <text x="400" y="222" text-anchor="middle" font-size="12.5" fill="currentColor" fill-opacity="0.65" class="tooltxt">Postman · REST Assured · Karate</text>
+      <text x="400" y="293" text-anchor="middle" font-size="16" font-weight="700" fill="currentColor">单元测试</text>
+      <text x="400" y="316" text-anchor="middle" font-size="12.5" fill="currentColor" fill-opacity="0.65" class="tooltxt">JUnit · pytest · Jest</text>
+    </svg>
+    <figcaption>测试金字塔:越往下,用例数量越多、执行越快、维护越便宜,自动化的投入重心也应放在下层;越往上越少而精。</figcaption>
+  </figure>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th scope="col">测试层次</th><th scope="col">代表工具</th><th scope="col">特点与适用</th></tr></thead>
+      <tbody>
+        <tr><td class="layer">单元测试</td><td class="tools"><code>JUnit</code><code>TestNG</code><code>pytest</code><code>Jest</code></td><td class="note">开发人员随代码编写;执行快、定位问题准,是自动化体系的地基</td></tr>
+        <tr><td class="layer">接口 / API 测试</td><td class="tools"><code>Postman</code><code>Newman</code><code>REST Assured</code><code>pytest + requests</code></td><td class="note">绕开界面直接验证服务;稳定、性价比高,是当前自动化的重点</td></tr>
+        <tr><td class="layer">Web UI 自动化</td><td class="tools"><code>Selenium</code><code>Playwright</code><code>Cypress</code></td><td class="note">模拟用户操作浏览器;Selenium 生态最广,Playwright 更现代、执行更快</td></tr>
+        <tr><td class="layer">移动端 UI 自动化</td><td class="tools"><code>Appium</code><code>UiAutomator2</code><code>Espresso</code><code>XCUITest</code></td><td class="note">Appium 一套脚本可跨 Android / iOS;后三者为官方原生框架</td></tr>
+        <tr><td class="layer">关键字 / BDD</td><td class="tools"><code>Robot Framework</code><code>Cucumber</code><code>Behave</code></td><td class="note">用例用关键字或自然语言表达,可读性强,便于测试与业务协作</td></tr>
+        <tr><td class="layer">性能测试</td><td class="tools"><code>JMeter</code><code>Locust</code><code>Gatling</code><code>k6</code></td><td class="note">模拟并发压力,评估响应时间、吞吐量与长时间稳定性</td></tr>
+        <tr><td class="layer">CI 集成</td><td class="tools"><code>Jenkins</code><code>GitHub Actions</code><code>GitLab CI</code></td><td class="note">定时或提交触发自动执行,是自动化"持续发生"的引擎</td></tr>
+        <tr><td class="layer">报告 / 平台</td><td class="tools"><code>Allure</code><code>Robot Framework Reports</code><code>TestRail</code></td><td class="note">结果可视化、历史趋势分析,与用例管理平台打通</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="instance">
+    <p class="inst-label">案例 · 一个移动端 App 自动化项目</p>
+    <p class="inst-line"><code>Robot Framework</code><span class="arrow">→</span><code>Appium</code><span class="arrow">→</span><code>UiAutomator2</code><span class="arrow">→</span><code>Jenkins</code></p>
+    <p class="inst-note">测试编排 → 移动端驱动 → 设备自动化 → 持续集成;对应金字塔中的 UI 自动化层,由 Jenkins 定时或提交触发执行。</p>
+  </div>
+</div></section>
+
+<section class="section" id="impact"><div class="wrap">
+  <p class="part">第三部分</p>
+  <h2>能达到的作用</h2>
+  <p class="lede">自动化解决的从来不是"少写用例",而是把重复的执行成本降到接近零,并且每次结果都一致。收益之外,边界同样要讲清楚。</p>
+
+  <div class="grid-2 benefits">
+    <div><h3 class="tick">回归效率</h3><p>版本迭代要反复验证已有功能;机器几分钟就能完成手工需要数小时的工作量。</p></div>
+    <div><h3 class="tick">结果一致可信</h3><p>每次执行的步骤与判据完全相同,没有人手疲劳、遗忘与操作波动。</p></div>
+    <div><h3 class="tick">反馈更快</h3><p>代码提交后自动验证,缺陷尽早暴露;发现越晚,修复成本越高。</p></div>
+    <div><h3 class="tick">覆盖手工难做的场景</h3><p>高并发、大数据量、7×24 长时间稳定性等场景,靠人工几乎无法覆盖。</p></div>
+    <div><h3 class="tick">释放人力</h3><p>重复劳动交给机器,测试人员转向探索性测试、场景设计与质量分析。</p></div>
+    <div><h3 class="tick">质量可度量</h3><p>自动生成报告与通过率趋势,质量状态可视化,支撑持续交付与发布决策。</p></div>
+  </div>
+
+  <div class="limits">
+    <h3>客观认识:边界与前提</h3>
+    <div class="limits-grid">
+      <div>
+        <h4>这些场景,手工测试更合适</h4>
+        <ul class="plain">
+          <li>探索性测试与缺陷深挖</li>
+          <li>易用性、视觉与体验判断</li>
+          <li>需求与界面频繁变动的阶段</li>
+          <li>一次性、低重复的验证</li>
+        </ul>
+      </div>
+      <div>
+        <h4>自动化的前提条件</h4>
+        <ul class="plain">
+          <li>前期需投入框架搭建与脚本开发,回报需要周期</li>
+          <li>脚本会随界面与需求变化,需要持续维护</li>
+          <li>依赖可用的设备与稳定的测试环境</li>
+        </ul>
+      </div>
+    </div>
+    <p class="principle">优先级原则:在「重复执行次数 × 单次手工成本」最高的用例上先投入自动化,避免"为了自动化而自动化"。</p>
+  </div>
+</div></section>
+
+<section class="section" id="outline"><div class="wrap">
+  <p class="part">附</p>
+  <h2>把素材变成 PPT 的参考结构</h2>
+  <p class="lede">按 45–60 分钟、面向测试与研发人员的培训节奏安排,可按需增删。</p>
+  <ol class="steps">
+    <li>封面:软件测试自动化(副标题:含义、工具与作用)</li>
+    <li>为什么做自动化:手工回归的痛点(耗时、重复、易漏)</li>
+    <li>含义:一句话定义 + 四个关键点</li>
+    <li>人机分工:自动化的是「执行」,不是「设计」</li>
+    <li>澄清三个常见误解</li>
+    <li>测试金字塔:工具按层次分布</li>
+    <li>常用工具速查表</li>
+    <li>案例:一个移动端自动化项目(Robot Framework + Appium + Jenkins)</li>
+    <li>作用:六项收益</li>
+    <li>边界与前提:什么时候不该自动化</li>
+    <li>总结与答疑</li>
+  </ol>
+</div></section>
+</main>
+
+<footer><div class="wrap">教学参考素材,可按课程需要自由裁剪与改编。</div></footer>

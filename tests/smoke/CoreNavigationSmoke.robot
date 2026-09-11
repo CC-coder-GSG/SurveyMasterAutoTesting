@@ -7,6 +7,7 @@ Resource    ../../resources/keywords/flows/MainNavigationSmoke.resource
 Resource    ../../resources/keywords/common/teardown.resource
 Test Tags    smoke    core_navigation    read_only
 
+
 *** Test Cases ***
 Core Navigation Should Be Available
     [Documentation]    Given 首次启动已处理；When 巡检四个主导航；Then 项目主页仍可正常使用。
