@@ -10,5 +10,5 @@ Tap Target Device
 
 Wait Search And Connect Bluetooth Device
     [Arguments]    ${text}
-    Sleep    20s   
+    Sleep    20s
     Scroll To And Tap Text Contains    ${text}
