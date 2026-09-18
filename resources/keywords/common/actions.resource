@@ -63,8 +63,7 @@ Android Scroll Into View By Text Contains
 
     # 5. 组装最终命令
     # .instance(0) 确保在有多个匹配时默认取第一个，防止报错
-    ${loc}=    Set Variable    android=new UiScrollable(${selector_java}.instance(0)).setMaxSearchSwipes(10)
-    ...    .scrollIntoView(new UiSelector().textContains("${text}"))
+    ${loc}=    Set Variable    android=new UiScrollable(${selector_java}.instance(0)).setMaxSearchSwipes(10).scrollIntoView(new UiSelector().textContains("${text}"))
     RETURN    ${loc}
 
 Scroll To And Tap Text Contains
