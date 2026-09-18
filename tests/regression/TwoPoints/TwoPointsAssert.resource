@@ -145,6 +145,20 @@ Verify Ratio With Tolerance
     [Arguments]    ${actual}    ${expected}    ${limit}
     ${a}=    Normalize Ratio    ${actual}
     ${e}=    Normalize Ratio    ${expected}
+
+    ${a_str}=    Convert To String    ${a}
+    ${e_str}=    Convert To String    ${e}
+
+    ${a_inf}=    Run Keyword And Return Status    Should Match Regexp    ${a_str}    (?i)^(inf|infinity|∞)$
+    ${e_inf}=    Run Keyword And Return Status    Should Match Regexp    ${e_str}    (?i)^(inf|infinity|∞)$
+
+    IF    ${a_inf} or ${e_inf}
+        IF    ${a_inf} and ${e_inf}
+            RETURN
+        END
+        Fail    ratio infinite mismatch: actual=${a_str} expected=${e_str}
+    END
+
     ${diff}=    Evaluate    abs(${a}-${e})
     IF    ${diff} > ${limit}
         Fail    diff=${diff} > tol=${limit}
@@ -194,7 +208,20 @@ Normalize Percent
 Normalize Ratio
     [Arguments]    ${value}
     ${v}=    Strip String    ${value}
+
+    ${is_inf_symbol}=    Run Keyword And Return Status    Should Match Regexp    ${v}    (?i)^(∞|inf|infinity)$
+    IF    ${is_inf_symbol}
+        ${result}=    Evaluate    float('inf')
+        RETURN    ${result}
+    END
+
     ${v}=    Replace String    ${v}    :    /
+    ${is_zero_denominator}=    Run Keyword And Return Status    Should Match Regexp    ${v}    ^.*\\/(0|0\\.0+)$
+    IF    ${is_zero_denominator}
+        ${result}=    Evaluate    float('inf')
+        RETURN    ${result}
+    END
+
     ${result}=    Evaluate    ${v}
     RETURN    ${result}
 
