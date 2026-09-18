@@ -1,6 +1,21 @@
 # Robot Framework outputs
 results/
 output/
+artifacts/
+log.html
+output.xml
+report.html
+*.html
+*.xml
+
+# Appium / local runtime artifacts
+.codex/
+.playwright-mcp/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.log
 
 # Python
 __pycache__/
